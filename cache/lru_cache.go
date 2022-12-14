@@ -1,8 +1,9 @@
-package sstable
+package cache
 
 import (
 	"bytes"
 	hash2 "hash"
+	"leveldb/utils"
 	"sync"
 )
 
@@ -108,7 +109,7 @@ func (ht *HandleTable) Resize(growth bool) {
 		newSlots = newSlots << 1
 	} else {
 		newSlots = newSlots >> 1
-		assert(newSlots >= htInitSlots)
+		utils.Assert(newSlots >= htInitSlots)
 	}
 
 	newList := make([]*LRUHandle, newSlots)
@@ -150,7 +151,7 @@ func (lruCache *LRUCache) Close() {
 	for inUse := lruCache.inUse.next; inUse != &lruCache.inUse; inUse = inUse.next {
 		lruCache.finishErase(inUse)
 	}
-	assert(lruCache.inUse.next == &lruCache.inUse)
+	utils.Assert(lruCache.inUse.next == &lruCache.inUse)
 	lruCache.Prune()
 }
 
@@ -249,7 +250,7 @@ func (c *LRUCache) finishErase(h *LRUHandle) {
 
 func (c *LRUCache) UnRef(h *LRUHandle) {
 
-	assert(h.ref > 0)
+	utils.Assert(h.ref > 0)
 	h.ref--
 	if h.ref == 0 {
 		h.deleter(h.key, h.value)

@@ -1,4 +1,4 @@
-package sstable
+package utils
 
 import (
 	"sync"
@@ -6,4 +6,10 @@ import (
 
 const mutexLocked = 1
 
-func assertMutexHeld(mutex *sync.RWMutex) {}
+func AssertMutexHeld(mutex *sync.RWMutex) {}
+
+func Assert(condition bool, msg ...string) {
+	if !condition {
+		panic(msg)
+	}
+}
