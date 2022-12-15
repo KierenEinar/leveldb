@@ -1,4 +1,4 @@
-package sstable
+package leveldb
 
 import "C"
 import (
@@ -688,4 +688,33 @@ func (v *Version) foreachOverlapping(ikey InternalKey, f func(level int, tFile t
 			}
 		}
 	}
+}
+
+func (vSet *VersionSet) allocFileNum() uint64 {
+	nextFileNum := vSet.nextFileNum
+	vSet.nextFileNum++
+	return nextFileNum
+}
+
+func (vSet *VersionSet) reuseFileNum(fileNum uint64) bool {
+	if vSet.nextFileNum-1 == fileNum {
+		vSet.nextFileNum = fileNum
+		return true
+	}
+	return false
+}
+
+func (vSet *VersionSet) markFileUsed(fileNum uint64) bool {
+	if vSet.nextFileNum <= fileNum {
+		vSet.nextFileNum = fileNum + 1
+		return true
+	}
+	return false
+}
+
+func (vSet *VersionSet) loadCompactPtr(level int) InternalKey {
+	if level < len(vSet.compactPtrs) {
+		return nil
+	}
+	return vSet.compactPtrs[level].ikey
 }

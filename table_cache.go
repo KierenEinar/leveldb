@@ -1,4 +1,4 @@
-package sstable
+package leveldb
 
 import (
 	"encoding/binary"
@@ -24,7 +24,7 @@ func NewTableCache(storage Storage, capacity uint32, hash32 hash2.Hash32) *Table
 	return c
 }
 
-func (c *TableCache) Get(ikey InternalKey, tFile tFile, f func(rkey InternalKey, value []byte)) error {
+func (c *TableCache) Get(ikey InternalKey, tFile TFile, f func(rkey InternalKey, value []byte)) error {
 	var cacheHandle *LRUHandle
 	if err := c.findTable(tFile, &cacheHandle); err != nil {
 		return err
@@ -42,13 +42,13 @@ func (c *TableCache) Get(ikey InternalKey, tFile tFile, f func(rkey InternalKey,
 	return nil
 }
 
-func (c *TableCache) Evict(tFile tFile) {
+func (c *TableCache) Evict(tFile TFile) {
 	lookupKey := make([]byte, 8)
 	binary.LittleEndian.PutUint64(lookupKey, tFile.fd.Num)
 	c.cache.Erase(lookupKey)
 }
 
-func (c *TableCache) findTable(tFile tFile, cacheHandle **LRUHandle) (err error) {
+func (c *TableCache) findTable(tFile TFile, cacheHandle **LRUHandle) (err error) {
 	lookupKey := make([]byte, 8)
 	binary.LittleEndian.PutUint64(lookupKey, tFile.fd.Num)
 	handle := c.cache.Lookup(lookupKey)

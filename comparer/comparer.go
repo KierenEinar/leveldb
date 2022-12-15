@@ -16,3 +16,5 @@ func (bc BytesComparer) Compare(a, b []byte) int {
 func (bc BytesComparer) Name() []byte {
 	return []byte("bytes.comparer")
 }
+
+var DefaultComparer = &BytesComparer{}

@@ -1,9 +1,10 @@
-package sstable
+package storage
 
 import (
 	"bytes"
 	"io"
 	"io/ioutil"
+	"leveldb/errors"
 	"os"
 	"path"
 	"runtime"
@@ -141,7 +142,7 @@ func (fs *FileStorage) GetCurrent() (fd Fd, err error) {
 	}
 
 	if fInfo.IsDir() {
-		err = ErrFileIsDir
+		err = errors.ErrFileIsDir
 		return
 	}
 
@@ -159,11 +160,11 @@ func (fs *FileStorage) GetCurrent() (fd Fd, err error) {
 	}
 
 	if len(content) == 0 || !bytes.HasSuffix(content, []byte("\n")) {
-		err = NewErrCorruption("invalid current file content")
+		err = errors.NewErrCorruption("invalid current file content")
 		return
 	}
 
-	currentFd, parseErr := parseFd(string(content))
+	currentFd, parseErr := ParseFd(string(content))
 	if parseErr != nil {
 		err = parseErr
 		return

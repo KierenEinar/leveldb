@@ -1,4 +1,4 @@
-package sstable
+package filter
 
 import (
 	"bytes"
@@ -100,3 +100,5 @@ func hash32(key []byte) uint32 {
 	defer hash.Reset()
 	return hash.Sum32()
 }
+
+var DefaultFilter = NewBloomFilter(10)

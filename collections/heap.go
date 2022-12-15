@@ -1,4 +1,4 @@
-package sstable
+package collections
 
 type HeapLess func(data []interface{}, i, j int) bool
 

@@ -1,13 +1,23 @@
-package sstable
+package iterator
 
 import (
-	"sort"
-	"sync/atomic"
+	"leveldb/collections"
+	"leveldb/comparer"
+	"leveldb/errors"
+	"leveldb/utils"
+)
+
+type Direction int
+
+const (
+	DirSOI     Direction = 1
+	DirForward Direction = 2
+	DirEOI     Direction = 3
 )
 
 type CommonIterator interface {
-	Releaser
-	Seek(key InternalKey) bool
+	utils.Releaser
+	Seek(key []byte) bool
 	SeekFirst() bool
 	Next() bool
 	Valid() error
@@ -24,94 +34,53 @@ type iteratorIndexer interface {
 	Get() Iterator
 }
 
-type emptyIterator struct{}
+type EmptyIterator struct{}
 
-func (ei *emptyIterator) Seek(key InternalKey) bool {
+func (ei *EmptyIterator) Seek(key []byte) bool {
 	return false
 }
 
-func (ei *emptyIterator) SeekFirst() bool {
+func (ei *EmptyIterator) SeekFirst() bool {
 	return false
 }
 
-func (ei *emptyIterator) Next() bool {
+func (ei *EmptyIterator) Next() bool {
 	return false
 }
 
-func (ei *emptyIterator) Key() []byte {
+func (ei *EmptyIterator) Key() []byte {
 	return nil
 }
 
-func (ei *emptyIterator) Value() []byte {
+func (ei *EmptyIterator) Value() []byte {
 	return nil
 }
 
-func (ei *emptyIterator) Ref() int32 {
+func (ei *EmptyIterator) Ref() int32 {
 	return 0
 }
 
-func (ei *emptyIterator) UnRef() int32 {
+func (ei *EmptyIterator) UnRef() int32 {
 	return 0
 }
 
-func (ei *emptyIterator) Valid() error {
+func (ei *EmptyIterator) Valid() error {
 	return nil
 }
 
-type Releaser interface {
-	Ref() int32
-	UnRef() int32
-}
-
-type BasicReleaser struct {
-	release uint32
-	ref     int32
-	OnClose func()
-	OnRef   func()
-	OnUnRef func()
-}
-
-func (br *BasicReleaser) Ref() int32 {
-	if br.OnRef != nil {
-		br.OnRef()
-	}
-	return atomic.AddInt32(&br.ref, 1)
-}
-
-func (br *BasicReleaser) UnRef() int32 {
-	newInt32 := atomic.AddInt32(&br.ref, -1)
-	if newInt32 < 0 {
-		panic("duplicated UnRef")
-	}
-	if br.OnUnRef != nil {
-		br.OnUnRef()
-	}
-	if newInt32 == 0 {
-		if br.OnClose != nil {
-			atomic.StoreUint32(&br.release, 1)
-			br.OnClose()
-		}
-	}
-	return newInt32
-}
-
-func (br *BasicReleaser) released() bool {
-	return atomic.LoadUint32(&br.release) == 1
-}
-
-type indexedIterator struct {
-	*BasicReleaser
+type IndexedIterator struct {
+	*utils.BasicReleaser
 	indexed iteratorIndexer
 	data    Iterator
 	err     error
-	ikey    InternalKey
+	ikey    []byte
 	value   []byte
 }
 
-func newIndexedIterator(indexed iteratorIndexer) Iterator {
-	ii := &indexedIterator{
+func NewIndexedIterator(indexed iteratorIndexer) Iterator {
+	ii := &IndexedIterator{
 		indexed: indexed,
-		BasicReleaser: &BasicReleaser{
+		BasicReleaser: &utils.BasicReleaser{
 			OnClose: func() {
 				indexed.UnRef()
 			},
@@ -120,25 +89,25 @@ func newIndexedIterator(indexed iteratorIndexer) Iterator {
 	return ii
 }
 
-func (iter *indexedIterator) clearData() {
+func (iter *IndexedIterator) clearData() {
 	if iter.data != nil {
 		iter.data.UnRef()
 		iter.data = nil
 	}
 }
 
-func (iter *indexedIterator) setData() {
+func (iter *IndexedIterator) setData() {
 	iter.data = iter.indexed.Get()
 }
 
-func (iter *indexedIterator) Next() bool {
+func (iter *IndexedIterator) Next() bool {
 
 	if iter.err != nil {
 		return false
 	}
 
-	if iter.released() {
-		iter.err = ErrReleased
+	if iter.Released() {
+		iter.err = errors.ErrReleased
 		return false
 	}
 
@@ -156,14 +125,14 @@ func (iter *indexedIterator) Next() bool {
 	return false
 }
 
-func (iter *indexedIterator) SeekFirst() bool {
+func (iter *IndexedIterator) SeekFirst() bool {
 
 	if iter.err != nil {
 		return false
 	}
 
-	if iter.released() {
-		iter.err = ErrReleased
+	if iter.Released() {
+		iter.err = errors.ErrReleased
 		return false
 	}
 
@@ -176,13 +145,13 @@ func (iter *indexedIterator) SeekFirst() bool {
 	return iter.Next()
 }
 
-func (iter *indexedIterator) Seek(key InternalKey) bool {
+func (iter *IndexedIterator) Seek(key []byte) bool {
 	if iter.err != nil {
 		return false
 	}
 
-	if iter.released() {
-		iter.err = ErrReleased
+	if iter.Released() {
+		iter.err = errors.ErrReleased
 		return false
 	}
 
@@ -204,34 +173,35 @@ func (iter *indexedIterator) Seek(key InternalKey) bool {
 	return true
 }
 
-func (iter *indexedIterator) Key() []byte {
+func (iter *IndexedIterator) Key() []byte {
 	if iter.data != nil {
 		return iter.data.Key()
 	}
 	return nil
 }
 
-func (iter *indexedIterator) Value() []byte {
+func (iter *IndexedIterator) Value() []byte {
 	if iter.data != nil {
 		return iter.data.Value()
 	}
 	return nil
 }
 
-func (iter *indexedIterator) Valid() error {
+func (iter *IndexedIterator) Valid() error {
 	return iter.err
 }
 
 type MergeIterator struct {
-	*BasicReleaser
+	*utils.BasicReleaser
 	err     error
 	iters   []Iterator
-	heap    *Heap
+	heap    *collections.Heap
 	keys    [][]byte
 	iterIdx int // current iter need to fill the heap
-	dir     direction
+	dir     Direction
 	ikey    []byte
 	value   []byte
+	cmp     comparer.BasicComparer
 }
 
 func NewMergeIterator(iters []Iterator) *MergeIterator {
@@ -241,7 +211,7 @@ func NewMergeIterator(iters []Iterator) *MergeIterator {
 		keys:  make([][]byte, len(iters)),
 	}
 
-	mi.heap = InitHeap(mi.minHeapLess)
+	mi.heap = collections.InitHeap(mi.minHeapLess)
 	mi.OnClose = func() {
 		mi.heap.Clear()
 		for i := range iters {
@@ -260,13 +230,13 @@ func (mi *MergeIterator) SeekFirst() bool {
 		return false
 	}
 
-	if mi.released() {
-		mi.err = ErrReleased
+	if mi.Released() {
+		mi.err = errors.ErrReleased
 		return false
 	}
 
 	mi.heap.Clear()
-	mi.dir = dirSOI
+	mi.dir = DirSOI
 	mi.ikey = mi.ikey[:0]
 	mi.value = mi.value[:0]
 	for i := 0; i < len(mi.iters); i++ {
@@ -288,14 +258,14 @@ func (mi *MergeIterator) Next() bool {
 		return false
 	}
 
-	if mi.released() {
-		mi.err = ErrReleased
+	if mi.Released() {
+		mi.err = errors.ErrReleased
 		return false
 	}
 
-	if mi.dir == dirForward {
+	if mi.dir == DirForward {
 		return mi.next()
-	} else if mi.dir == dirEOI {
+	} else if mi.dir == DirEOI {
 		return false
 	} else {
 		mi.SeekFirst()
@@ -303,15 +273,15 @@ func (mi *MergeIterator) Next() bool {
 	}
 }
 
-func (mi *MergeIterator) Seek(ikey InternalKey) bool {
+func (mi *MergeIterator) Seek(ikey []byte) bool {
 
 	mi.heap.Clear()
 	mi.iterIdx = 0
 	if mi.err != nil {
 		return false
 	}
-	if mi.released() {
-		mi.err = ErrReleased
+	if mi.Released() {
+		mi.err = errors.ErrReleased
 		return false
 	}
 	for i := range mi.iters {
@@ -331,10 +301,10 @@ func (mi *MergeIterator) Value() []byte {
 }
 
 func (mi *MergeIterator) next() bool {
-	mi.dir = dirForward
+	mi.dir = DirForward
 	idx := mi.heap.Pop()
 	if idx == nil {
-		mi.dir = dirEOI
+		mi.dir = DirEOI
 		return false
 	}
 	mi.iterIdx = idx.(int)
@@ -362,110 +332,10 @@ func (mi *MergeIterator) minHeapLess(data []interface{}, i, j int) bool {
 	keyi := mi.keys[indexi]
 	keyj := mi.keys[indexj]
 
-	r := InternalKey(keyi).compare(keyj)
+	r := mi.cmp.Compare(keyi, keyj)
 
 	if r > 0 {
 		return true
 	}
 	return false
-}
-
-type tFileArrIteratorIndexer struct {
-	*BasicReleaser
-	err       error
-	tFiles    tFiles
-	tableIter Iterator
-	index     int
-	len       int
-}
-
-func newTFileArrIteratorIndexer(tFiles tFiles) iteratorIndexer {
-	indexer := &tFileArrIteratorIndexer{
-		tFiles: tFiles,
-		index:  0,
-		len:    len(tFiles),
-	}
-	indexer.OnClose = func() {
-		if indexer.tableIter != nil {
-			indexer.tableIter.UnRef()
-		}
-		indexer.index = 0
-		indexer.tFiles = indexer.tFiles[:0]
-	}
-	return indexer
-}
-
-func (indexer *tFileArrIteratorIndexer) Next() bool {
-
-	if indexer.err != nil {
-		return false
-	}
-	if indexer.released() {
-		indexer.err = ErrReleased
-		return false
-	}
-
-	if indexer.index <= indexer.len-1 {
-		tFile := indexer.tFiles[indexer.index]
-		tr, err := NewTableReader(nil, tFile.Size)
-		if err != nil {
-			indexer.err = err
-			return false
-		}
-		if indexer.tableIter != nil {
-			indexer.tableIter.UnRef()
-		}
-		indexer.tableIter, indexer.err = tr.NewIterator()
-		if indexer.err != nil {
-			return false
-		}
-		indexer.index++
-		return true
-	}
-
-	return false
-
-}
-
-func (indexer *tFileArrIteratorIndexer) SeekFirst() bool {
-	if indexer.err != nil {
-		return false
-	}
-	if indexer.released() {
-		indexer.err = ErrReleased
-		return false
-	}
-	indexer.index = 0
-	return indexer.Next()
-}
-
-func (indexer *tFileArrIteratorIndexer) Seek(ikey InternalKey) bool {
-
-	if indexer.err != nil {
-		return false
-	}
-	if indexer.released() {
-		indexer.err = ErrReleased
-		return false
-	}
-
-	n := sort.Search(indexer.len, func(i int) bool {
-		r := indexer.tFiles[i].iMax.compare(ikey)
-		return r >= 0
-	})
-
-	if n == indexer.len {
-		return false
-	}
-
-	indexer.index = n
-	return indexer.Next()
-}
-
-func (indexer *tFileArrIteratorIndexer) Get() Iterator {
-	return indexer.tableIter
-}
-
-func (indexer *tFileArrIteratorIndexer) Valid() error {
-	return indexer.err
 }

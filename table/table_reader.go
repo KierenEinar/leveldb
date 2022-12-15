@@ -1,23 +1,43 @@
-package sstable
+package table
 
 import (
 	"bytes"
 	"encoding/binary"
 	"hash/crc32"
+	"leveldb/comparer"
+	"leveldb/errors"
+	"leveldb/filter"
+	"leveldb/ikey"
+	"leveldb/iterator"
+	"leveldb/storage"
+	"leveldb/utils"
 	"sort"
 )
 
+const blockTailLen = 5
+const tableFooterLen = 48
+
+type CompressionType uint8
+
+const (
+	compressionTypeNone   CompressionType = 0
+	compressionTypeSnappy CompressionType = 1
+)
+
+var magicByte = []byte("\x57\xfb\x80\x8b\x24\x75\x47\xdb")
+
 type dataBlock struct {
-	*BasicReleaser
+	*utils.BasicReleaser
+	cmp                comparer.BasicComparer
 	data               []byte
 	restartPointOffset int
 	restartPointNums   int
 }
 
-func newDataBlock(data []byte) (*dataBlock, error) {
+func newDataBlock(data []byte, cmp comparer.BasicComparer) (*dataBlock, error) {
 	dataLen := len(data)
 	if dataLen < 4 {
-		return nil, NewErrCorruption("block data corruption")
+		return nil, errors.NewErrCorruption("block data corruption")
 	}
 	restartPointNums := int(binary.LittleEndian.Uint32(data[len(data)-4:]))
 	restartPointOffset := len(data) - (restartPointNums+1)*4
@@ -25,35 +45,16 @@ func newDataBlock(data []byte) (*dataBlock, error) {
 		data:               data,
 		restartPointNums:   restartPointNums,
 		restartPointOffset: restartPointOffset,
+		cmp:                cmp,
 	}
 	block.OnClose = block.Close
 	block.Ref()
 	return block, nil
 }
 
-func (a InternalKey) compare(b InternalKey) int {
-	au := a.ukey()
-	bu := b.ukey()
-	ukeyC := bytes.Compare(au, bu)
-	if ukeyC > 0 {
-		return 1
-	} else if ukeyC < 0 {
-		return -1
-	} else {
-		aSeq := a.seq()
-		bSeq := b.seq()
-		if aSeq < bSeq {
-			return 1
-		} else if aSeq > bSeq {
-			return -1
-		}
-		return 0
-	}
-}
-
 func (br *dataBlock) entry(offset int) (entryLen, shareKeyLen int, unShareKey, value []byte, err error) {
 	if offset >= br.restartPointOffset {
-		err = ErrIterOutOfBounds
+		err = errors.ErrIterOutOfBounds
 		return
 	}
 	shareKeyLenU, n := binary.Uvarint(br.data[offset:])
@@ -68,7 +69,7 @@ func (br *dataBlock) entry(offset int) (entryLen, shareKeyLen int, unShareKey, v
 	return
 }
 
-func (br *dataBlock) readRestartPoint(restartPoint int) (unShareKey InternalKey) {
+func (br *dataBlock) readRestartPoint(restartPoint int) (unShareKey []byte) {
 	_, n := binary.Uvarint(br.data[restartPoint:])
 	unShareKeyLen, m := binary.Uvarint(br.data[restartPoint+n:])
 	_, k := binary.Uvarint(br.data[restartPoint+n+m:])
@@ -76,12 +77,12 @@ func (br *dataBlock) readRestartPoint(restartPoint int) (unShareKey InternalKey)
 	return
 }
 
-func (br *dataBlock) SeekRestartPoint(key InternalKey) int {
+func (br *dataBlock) SeekRestartPoint(key []byte) int {
 
 	n := sort.Search(br.restartPointNums, func(i int) bool {
 		restartPoint := binary.LittleEndian.Uint32(br.data[br.restartPointOffset : br.restartPointOffset+i*4])
 		unShareKey := br.readRestartPoint(int(restartPoint))
-		result := unShareKey.compare(key)
+		result := br.cmp.Compare(unShareKey, key)
 		return result > 0
 	})
 
@@ -101,21 +102,23 @@ func (br *dataBlock) Close() {
 
 type blockIter struct {
 	*dataBlock
-	*BasicReleaser
+	*utils.BasicReleaser
 	ref     int32
 	offset  int
 	prevKey []byte
-	dir     direction
+	dir     iterator.Direction
 	err     error
 	ikey    []byte
 	value   []byte
+	cmp     comparer.BasicComparer
 }
 
 func newBlockIter(dataBlock *dataBlock) *blockIter {
 	bi := &blockIter{
 		dataBlock: dataBlock,
+		cmp:       dataBlock.cmp,
 	}
-	br := &BasicReleaser{
+	br := &utils.BasicReleaser{
 		OnClose: func() {
 			dataBlock.UnRef()
 			bi.prevKey = nil
@@ -128,22 +131,14 @@ func newBlockIter(dataBlock *dataBlock) *blockIter {
 	return bi
 }
 
-type direction int
-
-const (
-	dirSOI     direction = 1
-	dirForward direction = 2
-	dirEOI     direction = 3
-)
-
 func (bi *blockIter) SeekFirst() bool {
-	bi.dir = dirSOI
+	bi.dir = iterator.DirSOI
 	bi.offset = 0
 	bi.prevKey = bi.prevKey[:0]
 	return bi.Next()
 }
 
-func (bi *blockIter) Seek(key InternalKey) bool {
+func (bi *blockIter) Seek(key []byte) bool {
 
 	bi.offset = bi.SeekRestartPoint(key)
 	bi.prevKey = bi.prevKey[:0]
@@ -152,8 +147,7 @@ func (bi *blockIter) Seek(key InternalKey) bool {
 		if bi.Valid() != nil {
 			return false
 		}
-		ikey := InternalKey(bi.ikey)
-		if ikey.compare(key) >= 0 {
+		if bi.cmp.Compare(key, bi.ikey) >= 0 {
 			return true
 		}
 	}
@@ -163,11 +157,11 @@ func (bi *blockIter) Seek(key InternalKey) bool {
 func (bi *blockIter) Next() bool {
 
 	if bi.offset >= bi.dataBlock.restartPointOffset {
-		bi.dir = dirEOI
+		bi.dir = iterator.DirEOI
 		return false
 	}
 
-	bi.dir = dirForward
+	bi.dir = iterator.DirForward
 	entryLen, shareKeyLen, unShareKey, value, err := bi.entry(bi.offset)
 	if err != nil {
 		bi.err = err
@@ -175,7 +169,7 @@ func (bi *blockIter) Next() bool {
 	}
 
 	if len(bi.prevKey) < shareKeyLen {
-		bi.err = ErrIterInvalidSharedKey
+		bi.err = errors.ErrIterInvalidSharedKey
 		return false
 	}
 
@@ -200,17 +194,18 @@ func (bi *blockIter) Value() []byte {
 }
 
 type TableReader struct {
-	*BasicReleaser
-	r           Reader
+	*utils.BasicReleaser
+	r           storage.Reader
 	tableSize   int
 	filterBlock *filterBlock
 	indexBlock  *dataBlock
 	indexBH     blockHandle
 	metaIndexBH blockHandle
-	iFilter     IFilter
+	iFilter     filter.IFilter
+	cmp         comparer.BasicComparer
 }
 
-func NewTableReader(r Reader, fileSize int) (*TableReader, error) {
+func NewTableReader(r storage.Reader, fileSize int, cmp comparer.BasicComparer) (*TableReader, error) {
 	footer := make([]byte, tableFooterLen)
 	_, err := r.ReadAt(footer, int64(fileSize-tableFooterLen))
 	if err != nil {
@@ -219,12 +214,13 @@ func NewTableReader(r Reader, fileSize int) (*TableReader, error) {
 	tr := &TableReader{
 		r:         r,
 		tableSize: fileSize,
-		BasicReleaser: &BasicReleaser{
+		BasicReleaser: &utils.BasicReleaser{
 			OnClose: func() {
 				_ = r.Close()
 			},
 		},
-		iFilter: defaultFilter,
+		iFilter: filter.DefaultFilter,
+		cmp:     cmp,
 	}
 	err = tr.readFooter()
 	if err != nil {
@@ -236,7 +232,7 @@ func NewTableReader(r Reader, fileSize int) (*TableReader, error) {
 		return nil, err
 	}
 
-	metaBlock, err := newDataBlock(metaIndexData)
+	metaBlock, err := newDataBlock(metaIndexData, cmp)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +266,7 @@ func (tableReader *TableReader) readFooter() error {
 
 	magic := footer[40:]
 	if bytes.Compare(magic, magicByte) != 0 {
-		return NewErrCorruption("footer decode failed")
+		return errors.NewErrCorruption("footer decode failed")
 	}
 
 	bhLen, indexBH := readBH(footer)
@@ -292,7 +288,7 @@ func (tr *TableReader) readRawBlock(bh blockHandle) (*dataBlock, error) {
 	}
 
 	if n < 5 {
-		return nil, NewErrCorruption("too short")
+		return nil, errors.NewErrCorruption("too short")
 	}
 
 	rawData := data[:n-5]
@@ -300,16 +296,16 @@ func (tr *TableReader) readRawBlock(bh blockHandle) (*dataBlock, error) {
 	compressionType := CompressionType(data[n-1])
 
 	if crc32.ChecksumIEEE(rawData) != checkSum {
-		return nil, NewErrCorruption("checksum failed")
+		return nil, errors.NewErrCorruption("checksum failed")
 	}
 
 	switch compressionType {
 	case compressionTypeNone:
 	default:
-		return nil, ErrUnSupportCompressionType
+		return nil, errors.ErrUnSupportCompressionType
 	}
 
-	block, err := newDataBlock(data[:n])
+	block, err := newDataBlock(data[:n], tr.cmp)
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +332,7 @@ func (tr *TableReader) getIndexBlock() (b *dataBlock, err error) {
 }
 
 // Seek return gte key
-func (tr *TableReader) find(key InternalKey, noValue bool, filtered bool) (ikey InternalKey, value []byte, err error) {
+func (tr *TableReader) find(key []byte, noValue bool, filtered bool) (ikey []byte, value []byte, err error) {
 	indexBlock, err := tr.getIndexBlock()
 	if err != nil {
 		return
@@ -347,7 +343,7 @@ func (tr *TableReader) find(key InternalKey, noValue bool, filtered bool) (ikey 
 	defer indexBlockIter.UnRef()
 
 	if !indexBlockIter.Seek(key) {
-		err = ErrNotFound
+		err = errors.ErrNotFound
 		return
 	}
 
@@ -356,7 +352,7 @@ func (tr *TableReader) find(key InternalKey, noValue bool, filtered bool) (ikey 
 	if filtered {
 		contains := tr.filterBlock.mayContains(tr.iFilter, blockHandle, key)
 		if !contains {
-			err = ErrNotFound
+			err = errors.ErrNotFound
 			return
 		}
 	}
@@ -387,7 +383,7 @@ func (tr *TableReader) find(key InternalKey, noValue bool, filtered bool) (ikey 
 	*/
 
 	if !indexBlockIter.Next() {
-		err = ErrNotFound
+		err = errors.ErrNotFound
 		return
 	}
 
@@ -403,7 +399,7 @@ func (tr *TableReader) find(key InternalKey, noValue bool, filtered bool) (ikey 
 	defer dataBlockIter1.UnRef()
 
 	if !dataBlockIter1.Seek(key) {
-		err = ErrNotFound
+		err = errors.ErrNotFound
 		return
 	}
 
@@ -414,42 +410,42 @@ func (tr *TableReader) find(key InternalKey, noValue bool, filtered bool) (ikey 
 	return
 }
 
-func (tr *TableReader) Find(key InternalKey) (rKey InternalKey, value []byte, err error) {
+func (tr *TableReader) Find(key []byte) (rKey []byte, value []byte, err error) {
 	return tr.find(key, false, true)
 }
 
-func (tr *TableReader) FindKey(key InternalKey) (rKey InternalKey, err error) {
+func (tr *TableReader) FindKey(key []byte) (rKey []byte, err error) {
 	rKey, _, err = tr.find(key, true, true)
 	return
 }
 
-func (tr *TableReader) Get(key InternalKey) (value []byte, err error) {
+func (tr *TableReader) Get(key []byte) (value []byte, err error) {
 
 	rKey, value, err := tr.find(key, false, true)
 	if err != nil {
 		return
 	}
 
-	if bytes.Compare(rKey.ukey(), key.ukey()) != 0 {
-		err = ErrNotFound
+	if bytes.Compare(ikey.InternalKey(rKey).UserKey(), ikey.InternalKey(key).UserKey()) != 0 {
+		err = errors.ErrNotFound
 		return
 	}
 
 	return value, nil
 }
 
-func (tr *TableReader) NewIterator() (Iterator, error) {
+func (tr *TableReader) NewIterator() (iterator.Iterator, error) {
 	indexer, err := newIndexIter(tr)
 	if err != nil {
 		return nil, err
 	}
-	return newIndexedIterator(indexer), nil
+	return iterator.NewIndexedIterator(indexer), nil
 }
 
 type indexIter struct {
 	*blockIter
 	tr *TableReader
-	*BasicReleaser
+	*utils.BasicReleaser
 }
 
 func newIndexIter(tr *TableReader) (*indexIter, error) {
@@ -463,7 +459,7 @@ func newIndexIter(tr *TableReader) (*indexIter, error) {
 	ii := &indexIter{
 		blockIter: blockIter,
 		tr:        tr,
-		BasicReleaser: &BasicReleaser{
+		BasicReleaser: &utils.BasicReleaser{
 			OnClose: func() {
 				blockIter.UnRef()
 				tr.UnRef()
@@ -473,7 +469,7 @@ func newIndexIter(tr *TableReader) (*indexIter, error) {
 	return ii, nil
 }
 
-func (indexIter *indexIter) Get() Iterator {
+func (indexIter *indexIter) Get() iterator.Iterator {
 	value := indexIter.Value()
 	if value == nil {
 		return nil
@@ -530,7 +526,7 @@ func (tr *TableReader) readFilterBlock(bh blockHandle) (*filterBlock, error) {
 	}, nil
 }
 
-func (filterBlock *filterBlock) mayContains(iFilter IFilter, bh blockHandle, ikey InternalKey) bool {
+func (filterBlock *filterBlock) mayContains(iFilter filter.IFilter, bh blockHandle, ikey ikey.InternalKey) bool {
 
 	idx := int(bh.offset / 1 << filterBlock.baseLg)
 	if idx+1 > filterBlock.filterNums {
@@ -540,5 +536,5 @@ func (filterBlock *filterBlock) mayContains(iFilter IFilter, bh blockHandle, ike
 	offsetN := filterBlock.offsets[idx]
 	offsetM := filterBlock.offsets[idx+1]
 	filter := filterBlock.data[offsetN:offsetM]
-	return iFilter.MayContains(filter, ikey.ukey())
+	return iFilter.MayContains(filter, ikey.UserKey())
 }

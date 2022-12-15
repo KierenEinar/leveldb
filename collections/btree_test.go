@@ -1,14 +1,15 @@
-package sstable
+package collections
 
 import (
 	"fmt"
+	"leveldb/comparer"
 	"math/rand"
 	"testing"
 )
 
 func TestBTree(t *testing.T) {
 
-	tree := InitBTree(3, DefaultComparer)
+	tree := InitBTree(3, comparer.DefaultComparer)
 	size := uint8(255)
 	insertList := make([][]byte, 0, size)
 
@@ -47,7 +48,7 @@ func TestBTree(t *testing.T) {
 }
 
 func TestBTree_Iterator(t *testing.T) {
-	tree := InitBTree(3, DefaultComparer)
+	tree := InitBTree(3, comparer.DefaultComparer)
 	size := uint8(255)
 	insertList := make([][]byte, 0, size)
 

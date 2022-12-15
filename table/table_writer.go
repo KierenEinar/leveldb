@@ -1,10 +1,14 @@
-package sstable
+package table
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
+	"leveldb/filter"
+	"leveldb/ikey"
+	"leveldb/storage"
+	"leveldb/utils"
 )
 
 /**
@@ -94,17 +98,30 @@ footer
 	/-----------------------------/
 **/
 
+const defaultDataBlockSize = 1 << 11
+
+var (
+	kMaxNumBytes = make([]byte, 8)
+)
+
+const kMaxSequenceNum = (uint64(1) << 56) - 1
+const kMaxNum = kMaxSequenceNum | uint64(ikey.KeyTypeValue)
+
+func init() {
+	binary.PutUvarint(kMaxNumBytes, kMaxNum)
+}
+
 type blockWriter struct {
 	scratch          []byte
 	data             bytes.Buffer
-	prevIKey         InternalKey
+	prevIKey         []byte
 	entries          int
 	restarts         []int
 	restartThreshold int
 	offset           int
 }
 
-func (bw *blockWriter) append(ikey InternalKey, value []byte) {
+func (bw *blockWriter) append(ikey []byte, value []byte) {
 
 	if bw.entries%bw.restartThreshold == 0 {
 		bw.prevIKey = bw.prevIKey[:0]
@@ -141,7 +158,7 @@ func (bw *blockWriter) bytesLen() int {
 	return bw.data.Len() + restartsLen*4 + 4
 }
 
-func (bw *blockWriter) writeEntry(ikey InternalKey, value []byte) {
+func (bw *blockWriter) writeEntry(ikey []byte, value []byte) {
 
 	var (
 		shareUKey     = getPrefixKey(bw.prevIKey, ikey)
@@ -181,12 +198,12 @@ type FilterWriter struct {
 	offsets         []int
 	nkeys           int
 	baseLg          int
-	filterGenerator IFilterGenerator
+	filterGenerator filter.IFilterGenerator
 	numBitsPerKey   uint8
 }
 
-func (fw *FilterWriter) addKey(ikey InternalKey) {
-	fw.filterGenerator.AddKey(ikey.ukey())
+func (fw *FilterWriter) addKey(ikey ikey.InternalKey) {
+	fw.filterGenerator.AddKey(ikey.UserKey())
 	fw.nkeys++
 }
 
@@ -228,7 +245,7 @@ type blockHandle struct {
 }
 
 func writeBH(dest []byte, bh blockHandle) []byte {
-	dest = ensureBuffer(dest, binary.MaxVarintLen64*2)
+	dest = utils.EnsureBuffer(dest, binary.MaxVarintLen64*2)
 	n1 := binary.PutUvarint(dest, bh.offset)
 	n2 := binary.PutUvarint(dest[n1:], bh.length)
 	return dest[:n1+n2]
@@ -244,30 +261,30 @@ func readBH(buf []byte) (bhLen int, bh blockHandle) {
 }
 
 type TableWriter struct {
-	writer      SequentialWriter
+	writer      storage.SequentialWriter
 	dataBlock   *blockWriter
 	indexBlock  *blockWriter
 	metaBlock   *blockWriter
 	filterBlock *FilterWriter
 
 	blockHandle *blockHandle
-	prevKey     InternalKey
+	prevKey     []byte
 	offset      int
 	entries     int
 
-	iFilter IFilter
+	iFilter filter.IFilter
 
 	scratch [50]byte // tail 20 bytes used to encode block handle
 }
 
-func NewTableWriter(w SequentialWriter) *TableWriter {
+func NewTableWriter(w storage.SequentialWriter) *TableWriter {
 	return &TableWriter{
 		writer:  w,
-		iFilter: defaultFilter,
+		iFilter: filter.DefaultFilter,
 	}
 }
 
-func (tableWriter *TableWriter) Append(ikey InternalKey, value []byte) error {
+func (tableWriter *TableWriter) Append(ikey, value []byte) error {
 
 	dataBlock := tableWriter.dataBlock
 	filterBlock := tableWriter.filterBlock
@@ -401,7 +418,7 @@ func (tableWriter *TableWriter) writeBlock(buf *bytes.Buffer, compressionType Co
 	return bh, nil
 }
 
-func (tableWriter *TableWriter) flushPendingBH(ikey InternalKey) error {
+func (tableWriter *TableWriter) flushPendingBH(ikey []byte) error {
 
 	if tableWriter.blockHandle == nil {
 		return nil
@@ -443,15 +460,15 @@ func (tableWriter *TableWriter) fileSize() int {
 	return tableWriter.offset
 }
 
-func iSuccessor(a InternalKey) (dest InternalKey) {
-	au := a.ukey()
+func iSuccessor(a ikey.InternalKey) (dest ikey.InternalKey) {
+	au := a.UserKey()
 	destU := getSuccessor(au)
 	dest = append(destU, kMaxNumBytes...)
 	return
 }
 
-func iSeparator(a, b InternalKey) (dest InternalKey) {
-	au, bu := a.ukey(), b.ukey()
+func iSeparator(a, b ikey.InternalKey) (dest ikey.InternalKey) {
+	au, bu := a.UserKey(), b.UserKey()
 	destU := getSeparator(au, bu)
 	dest = append(destU, kMaxNumBytes...)
 	return
@@ -496,10 +513,10 @@ func getSeparator(a, b []byte) (dest []byte) {
 	return
 }
 
-func getPrefixKey(prevIKey, ikey InternalKey) []byte {
+func getPrefixKey(prevIKey, ikey ikey.InternalKey) []byte {
 
-	prevUkey := prevIKey.ukey()
-	uKey := ikey.ukey()
+	prevUkey := prevIKey.UserKey()
+	uKey := ikey.UserKey()
 
 	size := len(prevUkey)
 	if len(uKey) < size {

@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"io"
+	"leveldb/errors"
+	"leveldb/storage"
 )
 
 /**
@@ -30,6 +32,10 @@ each block is 32kb, block header is
 
 **/
 
+const kJournalBlockSize = 1 << 15
+const kWritableBufferSize = 1 << 16
+const journalBlockHeaderLen = 7
+
 const (
 	kRecordFull    = byte(1)
 	kRecordFirst   = byte(2)
@@ -46,7 +52,7 @@ type JournalWriter struct {
 	blockOffset int
 }
 
-func NewJournalWriter(writer SequentialWriter) *JournalWriter {
+func NewJournalWriter(writer storage.SequentialWriter) *JournalWriter {
 	return &JournalWriter{
 		dest: &writableFile{
 			w: writer,
@@ -155,7 +161,7 @@ func (jw *JournalWriter) Sync() error {
 
 type writableFile struct {
 	optionFlush bool
-	w           SequentialWriter
+	w           storage.SequentialWriter
 	pos         int
 	buf         [kWritableBufferSize]byte
 }
@@ -235,7 +241,7 @@ type JournalReader struct {
 	scratch bytes.Buffer // for reused read
 }
 
-func NewJournalReader(reader SequentialReader) *JournalReader {
+func NewJournalReader(reader storage.SequentialReader) *JournalReader {
 	return &JournalReader{
 		src: &sequentialFile{
 			SequentialReader: reader,
@@ -250,17 +256,17 @@ type chunkReader struct {
 	eof              bool
 }
 
-func (jr *JournalReader) NextChunk() (SequentialReader, error) {
+func (jr *JournalReader) NextChunk() (storage.SequentialReader, error) {
 
 	for {
 		kRecordType, fragment, err := jr.seekNextFragment(true)
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		if err == ErrJournalSkipped {
+		if err == errors.ErrJournalSkipped {
 			continue
 		}
-		if err == ErrMissingChunk {
+		if err == errors.ErrMissingChunk {
 			jr.scratch.Reset()
 			continue
 		}
@@ -355,29 +361,29 @@ func (jr *JournalReader) seekNextFragment(first bool) (kRecordType byte, fragmen
 	}
 
 	if kRecordType == kBadRecord {
-		err = ErrJournalSkipped
+		err = errors.ErrJournalSkipped
 		return
 	}
 
 	switch kRecordType {
 	case kRecordFirst, kRecordFull:
 		if !first {
-			err = ErrMissingChunk
+			err = errors.ErrMissingChunk
 		}
 		return
 	case kRecordMiddle, kRecordLast:
 		if first {
-			err = ErrMissingChunk
+			err = errors.ErrMissingChunk
 		}
 		return
 	default:
-		err = ErrJournalSkipped
+		err = errors.ErrJournalSkipped
 		return
 	}
 }
 
 type sequentialFile struct {
-	SequentialReader
+	storage.SequentialReader
 	physicalReadOffset int // current cursor read offset
 	physicalN          int // current physical offset
 	buf                [kJournalBlockSize]byte

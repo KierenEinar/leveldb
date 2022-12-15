@@ -1,4 +1,4 @@
-package sstable
+package leveldb
 
 import (
 	"bytes"

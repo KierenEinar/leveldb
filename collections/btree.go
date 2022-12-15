@@ -1,15 +1,16 @@
-package sstable
+package collections
 
 import (
 	"bytes"
 	"fmt"
+	"leveldb/comparer"
 	"sort"
 )
 
 type BTree struct {
 	degree int
 	root   *BTreeNode
-	cmp    BasicComparer
+	cmp    comparer.BasicComparer
 }
 
 type BTreeNode struct {
@@ -37,7 +38,7 @@ func newNode(degree int, isLeaf bool) *BTreeNode {
 	return node
 }
 
-func InitBTree(degree int, cmp BasicComparer) *BTree {
+func InitBTree(degree int, cmp comparer.BasicComparer) *BTree {
 	return &BTree{
 		degree: degree,
 		cmp:    cmp,
@@ -100,7 +101,7 @@ func (node *BTreeNode) splitChild() *BTreeNode {
 	return z
 }
 
-func insertNonFull(node *BTreeNode, key []byte, value interface{}, cmp BasicComparer) {
+func insertNonFull(node *BTreeNode, key []byte, value interface{}, cmp comparer.BasicComparer) {
 
 	idx := sort.Search(node.num, func(i int) bool {
 		return cmp.Compare(node.keys[i], key) >= 0
@@ -166,7 +167,7 @@ func (btree *BTree) Remove(key []byte) bool {
 // note, caller should follow this rules
 // * only root node's num can lt degree if is root
 // * other wise node's num should be gte than degree
-func remove(node *BTreeNode, key []byte, cmp BasicComparer) bool {
+func remove(node *BTreeNode, key []byte, cmp comparer.BasicComparer) bool {
 
 	idx := sort.Search(node.num, func(i int) bool {
 		return cmp.Compare(node.keys[i], key) >= 0
@@ -370,7 +371,7 @@ func (btree *BTree) Get(key []byte) (interface{}, bool) {
 	return get(btree.root, key, btree.cmp)
 }
 
-func get(node *BTreeNode, key []byte, cmp BasicComparer) (interface{}, bool) {
+func get(node *BTreeNode, key []byte, cmp comparer.BasicComparer) (interface{}, bool) {
 	idx := sort.Search(node.num, func(i int) bool {
 		return cmp.Compare(node.keys[i], key) >= 0
 	})
@@ -400,7 +401,7 @@ func (btree *BTree) Has(key []byte) bool {
 	return has(btree.root, key, btree.cmp)
 }
 
-func has(node *BTreeNode, key []byte, cmp BasicComparer) bool {
+func has(node *BTreeNode, key []byte, cmp comparer.BasicComparer) bool {
 	idx := sort.Search(node.num, func(i int) bool {
 		return cmp.Compare(node.keys[i], key) >= 0
 	})

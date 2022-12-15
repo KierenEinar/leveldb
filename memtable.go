@@ -1,35 +1,37 @@
-package sstable
+package leveldb
 
 import (
 	"bytes"
+	"leveldb/collections"
+	"leveldb/ikey"
 	"time"
 )
 
 type MemDB struct {
 	iCmp *iComparer
-	*SkipList
+	*collections.SkipList
 }
 
 func NewMemTable(capacity int, iCmp *iComparer) *MemDB {
 	memDB := &MemDB{
-		SkipList: NewSkipList(time.Now().UnixNano(), capacity, iCmp),
+		SkipList: collections.NewSkipList(time.Now().UnixNano(), capacity, iCmp),
 		iCmp:     iCmp,
 	}
 	return memDB
 }
 
-func (memTable *MemDB) Put(ukey []byte, sequence Sequence, value []byte) error {
-	ikey := buildInternalKey(nil, ukey, keyTypeValue, sequence)
+func (memTable *MemDB) Put(ukey []byte, sequence ikey.Sequence, value []byte) error {
+	ikey := ikey.BuildInternalKey(nil, ukey, ikey.KeyTypeValue, sequence)
 	return memTable.SkipList.Put(ikey, value)
 }
 
-func (memTable *MemDB) Del(ukey []byte, sequence Sequence) error {
-	ikey := buildInternalKey(nil, ukey, keyTypeDel, sequence)
+func (memTable *MemDB) Del(ukey []byte, sequence ikey.Sequence) error {
+	ikey := ikey.BuildInternalKey(nil, ukey, ikey.KeyTypeDel, sequence)
 	return memTable.SkipList.Put(ikey, nil)
 }
 
 // Find find the ukey whose eq ikey.uKey(), if keytype is del, err is ErrNotFound, and will return the rkey
-func (memTable *MemDB) Find(ikey InternalKey) (rkey []byte, value []byte, err error) {
+func (memTable *MemDB) Find(ikey ikey.InternalKey) (rkey []byte, value []byte, err error) {
 	node, _, err := memTable.SkipList.FindGreaterOrEqual(ikey)
 	if err != nil {
 		return

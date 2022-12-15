@@ -1,6 +1,10 @@
-package sstable
+package collections
 
 import (
+	"leveldb/comparer"
+	"leveldb/errors"
+	"leveldb/iterator"
+	"leveldb/utils"
 	"math/rand"
 	"sync"
 )
@@ -12,7 +16,7 @@ const (
 )
 
 type SkipList struct {
-	*BasicReleaser
+	*utils.BasicReleaser
 	level          int8
 	rand           *rand.Rand
 	seed           int64
@@ -24,10 +28,10 @@ type SkipList struct {
 	rw             sync.RWMutex
 	updatesScratch [kMaxHeight]*skipListNode
 
-	BasicComparer
+	comparer.BasicComparer
 }
 
-func NewSkipList(seed int64, capacity int, cmp BasicComparer) *SkipList {
+func NewSkipList(seed int64, capacity int, cmp comparer.BasicComparer) *SkipList {
 	skl := &SkipList{
 		rand:          rand.New(rand.NewSource(seed)),
 		seed:          seed,
@@ -39,8 +43,8 @@ func NewSkipList(seed int64, capacity int, cmp BasicComparer) *SkipList {
 }
 
 func (skl *SkipList) Put(key, value []byte) (err error) {
-	if skl.released() {
-		err = ErrReleased
+	if skl.Released() {
+		err = errors.ErrReleased
 		return
 	}
 	skl.rw.Lock()
@@ -123,8 +127,8 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 
 func (skl *SkipList) Del(key []byte) (updated bool, err error) {
 
-	if skl.released() {
-		err = ErrReleased
+	if skl.Released() {
+		err = errors.ErrReleased
 		return
 	}
 
@@ -179,12 +183,12 @@ func (skl *SkipList) Get(key []byte) ([]byte, error) {
 	} else if found == true {
 		return n.value(skl.kvData), nil
 	}
-	return nil, ErrNotFound
+	return nil, errors.ErrNotFound
 }
 
 func (skl *SkipList) FindGreaterOrEqual(key []byte) (*skipListNode, bool, error) {
-	if skl.released() {
-		return nil, false, ErrReleased
+	if skl.Released() {
+		return nil, false, errors.ErrReleased
 	}
 
 	skl.rw.RLock()
@@ -221,11 +225,12 @@ func (skl *SkipList) Capacity() int {
 	skl.rw.RLock()
 	defer skl.rw.RUnlock()
 	return cap(skl.kvData)
+	return cap(skl.kvData)
 }
 
 // NewIterator return an iter
 // caller should call UnRef after iterate end
-func (skl *SkipList) NewIterator() Iterator {
+func (skl *SkipList) NewIterator() iterator.Iterator {
 	skl.Ref()
 	sklIter := &SkipListIter{
 		skl: skl,
@@ -239,29 +244,29 @@ func (skl *SkipList) NewIterator() Iterator {
 type SkipListIter struct {
 	skl *SkipList
 	n   *skipListNode
-	dir direction
-	Iterator
-	*BasicReleaser
+	dir iterator.Direction
+	iterator.Iterator
+	*utils.BasicReleaser
 	iterErr error
 }
 
 func (sklIter *SkipListIter) SeekFirst() bool {
-	if sklIter.released() {
-		sklIter.iterErr = ErrReleased
+	if sklIter.Released() {
+		sklIter.iterErr = errors.ErrReleased
 		return false
 	}
 
 	sklIter.n = sklIter.skl.dummyHead
-	sklIter.dir = dirSOI
+	sklIter.dir = iterator.DirSOI
 	return sklIter.Next()
 }
 
 func (sklIter *SkipListIter) Next() bool {
-	if sklIter.released() {
-		sklIter.iterErr = ErrReleased
+	if sklIter.Released() {
+		sklIter.iterErr = errors.ErrReleased
 		return false
 	}
-	if sklIter.dir == dirSOI {
+	if sklIter.dir == iterator.DirSOI {
 		return false
 	}
 	skl := sklIter.skl
@@ -274,17 +279,17 @@ func (sklIter *SkipListIter) Next() bool {
 
 	n := sklIter.n.next(0)
 	if n == nil {
-		sklIter.dir = dirEOI
+		sklIter.dir = iterator.DirEOI
 		return false
 	}
-	sklIter.dir = dirForward
+	sklIter.dir = iterator.DirForward
 	sklIter.n = n
 	return true
 }
 
 func (sklIter *SkipListIter) Valid() error {
-	if sklIter.released() {
-		return ErrReleased
+	if sklIter.Released() {
+		return errors.ErrReleased
 	}
 	if sklIter.iterErr != nil {
 		return sklIter.iterErr
@@ -292,10 +297,10 @@ func (sklIter *SkipListIter) Valid() error {
 	return nil
 }
 
-func (sklIter *SkipListIter) Seek(key InternalKey) bool {
+func (sklIter *SkipListIter) Seek(key []byte) bool {
 
-	if sklIter.released() {
-		sklIter.iterErr = ErrReleased
+	if sklIter.Released() {
+		sklIter.iterErr = errors.ErrReleased
 		return false
 	}
 
@@ -311,11 +316,11 @@ func (sklIter *SkipListIter) Seek(key InternalKey) bool {
 	}
 
 	if node == nil {
-		sklIter.dir = dirEOI
+		sklIter.dir = iterator.DirEOI
 		return false
 	}
 	sklIter.n = node
-	sklIter.dir = dirForward
+	sklIter.dir = iterator.DirForward
 	return true
 }
 

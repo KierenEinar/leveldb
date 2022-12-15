@@ -1,8 +1,8 @@
 package leveldb
 
 import (
-	"bytes"
 	"leveldb/comparer"
+	"leveldb/ikey"
 )
 
 type iComparer struct {
@@ -10,12 +10,12 @@ type iComparer struct {
 }
 
 func (ic iComparer) Compare(a, b []byte) int {
-	ia, ib := InternalKey(a), InternalKey(b)
-	r := ic.uCmp.Compare(ia.ukey(), ib.ukey())
+	ia, ib := ikey.InternalKey(a), ikey.InternalKey(b)
+	r := ic.uCmp.Compare(ia.UserKey(), ib.UserKey())
 	if r != 0 {
 		return r
 	}
-	m, n := ia.seq(), ib.seq()
+	m, n := ia.Seq(), ib.Seq()
 	if m < n {
 		return 1
 	}
@@ -26,7 +26,6 @@ func (ic iComparer) Name() []byte {
 	return []byte("leveldb.InternalKeyComparator")
 }
 
-var DefaultComparer = &BytesComparer{}
 var IComparer = &iComparer{
-	uCmp: DefaultComparer,
+	uCmp: comparer.DefaultComparer,
 }

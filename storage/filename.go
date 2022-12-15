@@ -1,4 +1,4 @@
-package sstable
+package storage
 
 import (
 	"errors"
@@ -42,14 +42,15 @@ func (fd Fd) String() string {
 	}
 }
 
-// filename format
+// ParseFd parse file fd
+//  filename format
 // CURRENT
 // LOCK
 // MANIFEST-%06d
 // %06d.log
 // %06d.ldb
 // %06d.dbtmp
-func parseFd(fileName string) (fd Fd, err error) {
+func ParseFd(fileName string) (fd Fd, err error) {
 
 	if fileName == "CURRENT" {
 		fd.FileType = KCurrentFile
