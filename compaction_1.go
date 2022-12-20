@@ -2,6 +2,9 @@ package leveldb
 
 import (
 	"bytes"
+	"leveldb/comparer"
+	"leveldb/config"
+	"leveldb/utils"
 	"sort"
 	"sync/atomic"
 )
@@ -21,14 +24,14 @@ type compaction1 struct {
 
 	inputOverlappedGPIndex int
 
-	cmp BasicComparer
+	cmp comparer.Comparer
 
 	minSeq         Sequence
 	tWriter        *tWriter
 	tableOperation *tableOperation
 	edit           VersionEdit
 
-	baseLevelI [kLevelNum]int
+	baseLevelI [config.KLevelNum]int
 }
 
 func (vSet *VersionSet) pickCompaction1() *compaction1 {
@@ -39,7 +42,7 @@ func (vSet *VersionSet) pickCompaction1() *compaction1 {
 	}
 
 	cLevel := vSet.current.cLevel
-	assert(cLevel < kLevelNum)
+	utils.Assert(cLevel < config.KLevelNum)
 
 	level := vSet.current.levels[cLevel]
 

@@ -34,6 +34,10 @@ type LRUHandle struct {
 	charge  uint32
 }
 
+func (lh *LRUHandle) Value() interface{} {
+	return lh.value
+}
+
 type HandleTable struct {
 	list  []*LRUHandle
 	slots uint32

@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"leveldb/config"
-	"leveldb/ikey"
 	"leveldb/storage"
 	"leveldb/utils"
 	"sort"
@@ -13,8 +12,8 @@ import (
 
 type tFile struct {
 	fd   storage.Fd
-	iMax ikey.InternalKey
-	iMin ikey.InternalKey
+	iMax InternalKey
+	iMin InternalKey
 	Size int
 }
 
@@ -34,7 +33,7 @@ func (s tFile) isOverlapped(umin []byte, umax []byte) bool {
 	return !(bytes.Compare(smax, umin) < 0) && !(bytes.Compare(smin, umax) > 0)
 }
 
-func (s tFiles) getOverlapped(imin ikey.InternalKey, imax ikey.InternalKey, overlapped bool) (dst tFiles) {
+func (s tFiles) getOverlapped(imin InternalKey, imax InternalKey, overlapped bool) (dst tFiles) {
 
 	if !overlapped {
 
@@ -124,7 +123,7 @@ func newTableOperation(s Storage, meta *VersionSet) *tableOperation {
 	}
 }
 
-func (tableOperation *tableOperation) open(f TFile) (*TableReader, error) {
+func (tableOperation *tableOperation) open(f tFile) (*TableReader, error) {
 	reader, err := tableOperation.storage.Open(f.fd)
 	if err != nil {
 		return nil, err

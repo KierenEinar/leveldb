@@ -3,33 +3,38 @@ package leveldb
 import (
 	"encoding/binary"
 	hash2 "hash"
+	"leveldb/cache"
+	"leveldb/comparer"
+	"leveldb/storage"
+	"leveldb/table"
 	"runtime"
 )
 
 type TableCache struct {
-	cache   Cache
-	storage Storage
+	cache   cache.Cache
+	storage storage.Storage
+	cmp     comparer.BasicComparer
 }
 
 func (c *TableCache) Close() {
 	c.cache.Close()
 }
 
-func NewTableCache(storage Storage, capacity uint32, hash32 hash2.Hash32) *TableCache {
+func NewTableCache(storage storage.Storage, capacity uint32, hash32 hash2.Hash32, cmp comparer.BasicComparer) *TableCache {
 	c := &TableCache{
-		cache:   NewCache(capacity, hash32),
+		cache:   cache.NewCache(capacity, hash32),
 		storage: storage,
 	}
 	runtime.SetFinalizer(c, (*TableCache).Close)
 	return c
 }
 
-func (c *TableCache) Get(ikey InternalKey, tFile TFile, f func(rkey InternalKey, value []byte)) error {
-	var cacheHandle *LRUHandle
+func (c *TableCache) Get(ikey InternalKey, tFile tFile, f func(rkey InternalKey, value []byte)) error {
+	var cacheHandle *cache.LRUHandle
 	if err := c.findTable(tFile, &cacheHandle); err != nil {
 		return err
 	}
-	tReader, ok := cacheHandle.value.(*TableReader)
+	tReader, ok := cacheHandle.Value().(*table.TableReader)
 	if !ok {
 		panic("leveldb/cache value not type *TableReader")
 	}
@@ -42,13 +47,13 @@ func (c *TableCache) Get(ikey InternalKey, tFile TFile, f func(rkey InternalKey,
 	return nil
 }
 
-func (c *TableCache) Evict(tFile TFile) {
+func (c *TableCache) Evict(tFile tFile) {
 	lookupKey := make([]byte, 8)
 	binary.LittleEndian.PutUint64(lookupKey, tFile.fd.Num)
 	c.cache.Erase(lookupKey)
 }
 
-func (c *TableCache) findTable(tFile TFile, cacheHandle **LRUHandle) (err error) {
+func (c *TableCache) findTable(tFile tFile, cacheHandle **cache.LRUHandle) (err error) {
 	lookupKey := make([]byte, 8)
 	binary.LittleEndian.PutUint64(lookupKey, tFile.fd.Num)
 	handle := c.cache.Lookup(lookupKey)
@@ -58,7 +63,7 @@ func (c *TableCache) findTable(tFile TFile, cacheHandle **LRUHandle) (err error)
 			err = oErr
 			return
 		}
-		tReader, tErr := NewTableReader(reader, tFile.Size)
+		tReader, tErr := table.NewTableReader(reader, tFile.Size, c.cmp)
 		if tErr != nil {
 			err = tErr
 			return
@@ -70,7 +75,7 @@ func (c *TableCache) findTable(tFile TFile, cacheHandle **LRUHandle) (err error)
 }
 
 func (c *TableCache) deleteEntry(key []byte, value interface{}) {
-	tReader, ok := value.(*TableReader)
+	tReader, ok := value.(*table.TableReader)
 	if !ok {
 		panic("leveldb/cache value not type *TableReader")
 	}

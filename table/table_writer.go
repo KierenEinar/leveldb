@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
+	"leveldb/comparer"
 	"leveldb/filter"
-	"leveldb/ikey"
 	"leveldb/storage"
 	"leveldb/utils"
 )
@@ -100,17 +100,6 @@ footer
 
 const defaultDataBlockSize = 1 << 11
 
-var (
-	kMaxNumBytes = make([]byte, 8)
-)
-
-const kMaxSequenceNum = (uint64(1) << 56) - 1
-const kMaxNum = kMaxSequenceNum | uint64(ikey.KeyTypeValue)
-
-func init() {
-	binary.PutUvarint(kMaxNumBytes, kMaxNum)
-}
-
 type blockWriter struct {
 	scratch          []byte
 	data             bytes.Buffer
@@ -119,6 +108,7 @@ type blockWriter struct {
 	restarts         []int
 	restartThreshold int
 	offset           int
+	cmp              comparer.Comparer
 }
 
 func (bw *blockWriter) append(ikey []byte, value []byte) {
@@ -161,7 +151,7 @@ func (bw *blockWriter) bytesLen() int {
 func (bw *blockWriter) writeEntry(ikey []byte, value []byte) {
 
 	var (
-		shareUKey     = getPrefixKey(bw.prevIKey, ikey)
+		shareUKey     = bw.cmp.Prefix(bw.prevIKey, ikey)
 		shareUKeyLen  = len(shareUKey)
 		unShareKeyLen = len(ikey) - shareUKeyLen
 		unShareKey    = ikey[unShareKeyLen:]
@@ -202,8 +192,8 @@ type FilterWriter struct {
 	numBitsPerKey   uint8
 }
 
-func (fw *FilterWriter) addKey(ikey ikey.InternalKey) {
-	fw.filterGenerator.AddKey(ikey.UserKey())
+func (fw *FilterWriter) addKey(ikey []byte) {
+	fw.filterGenerator.AddKey(ikey)
 	fw.nkeys++
 }
 
@@ -275,6 +265,7 @@ type TableWriter struct {
 	iFilter filter.IFilter
 
 	scratch [50]byte // tail 20 bytes used to encode block handle
+	cmp     comparer.Comparer
 }
 
 func NewTableWriter(w storage.SequentialWriter) *TableWriter {
@@ -425,9 +416,9 @@ func (tableWriter *TableWriter) flushPendingBH(ikey []byte) error {
 	}
 	var separator []byte
 	if len(ikey) == 0 {
-		separator = iSuccessor(tableWriter.prevKey)
+		separator = tableWriter.cmp.Successor(tableWriter.prevKey)
 	} else {
-		separator = iSeparator(tableWriter.prevKey, ikey)
+		separator = tableWriter.cmp.Separator(tableWriter.prevKey, ikey)
 	}
 	indexBlock := tableWriter.indexBlock
 	bhEntry := writeBH(tableWriter.scratch[30:], *tableWriter.blockHandle)
@@ -458,84 +449,4 @@ func (tableWriter *TableWriter) flushFooter(indexBH, metaBH blockHandle) error {
 
 func (tableWriter *TableWriter) fileSize() int {
 	return tableWriter.offset
-}
-
-func iSuccessor(a ikey.InternalKey) (dest ikey.InternalKey) {
-	au := a.UserKey()
-	destU := getSuccessor(au)
-	dest = append(destU, kMaxNumBytes...)
-	return
-}
-
-func iSeparator(a, b ikey.InternalKey) (dest ikey.InternalKey) {
-	au, bu := a.UserKey(), b.UserKey()
-	destU := getSeparator(au, bu)
-	dest = append(destU, kMaxNumBytes...)
-	return
-}
-
-// return the successor that Gte ikey
-// e.g. abc => b
-// e.g. 0xff 0xff abc => 0xff 0xff b
-func getSuccessor(a []byte) (dest []byte) {
-	for i := range a {
-		c := a[i]
-		if c < 0xff {
-			dest = append(dest, a[:i+1]...)
-			dest[len(dest)-1]++
-			return
-		}
-	}
-	dest = append(dest, a...)
-	return
-}
-
-// return x that is gte a and lt b
-func getSeparator(a, b []byte) (dest []byte) {
-	i, n := 0, len(a)
-	if n > len(b) {
-		n = len(b)
-	}
-
-	for ; i < n && a[i] == b[i]; i++ {
-
-	}
-
-	if i == n {
-
-	} else if c := a[i]; c < 0xff && c+1 < b[i] {
-		dest = append(dest, a[:i+1]...)
-		dest[len(dest)-1]++
-		return
-	}
-
-	dest = append(dest, a...)
-	return
-}
-
-func getPrefixKey(prevIKey, ikey ikey.InternalKey) []byte {
-
-	prevUkey := prevIKey.UserKey()
-	uKey := ikey.UserKey()
-
-	size := len(prevUkey)
-	if len(uKey) < size {
-		size = len(uKey)
-	}
-
-	dest := make([]byte, size)
-
-	var sharePrefixIndex = 0
-
-	for sharePrefixIndex = 0; sharePrefixIndex < size; sharePrefixIndex++ {
-		c1 := prevUkey[sharePrefixIndex]
-		c2 := uKey[sharePrefixIndex]
-		if c1 == c2 {
-			dest[sharePrefixIndex] = c1
-		} else {
-			break
-		}
-	}
-
-	return dest[:sharePrefixIndex]
 }

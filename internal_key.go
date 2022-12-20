@@ -1,7 +1,8 @@
-package ikey
+package leveldb
 
 import (
 	"encoding/binary"
+	"fmt"
 	"leveldb/errors"
 	"leveldb/utils"
 )
@@ -15,12 +16,22 @@ const (
 	KeyTypeDel   KeyType = 1
 )
 
+var (
+	kMaxNumBytes = make([]byte, 8)
+)
+
+const kMaxSequenceNum = (uint64(1) << 56) - 1
+const kMaxNum = kMaxSequenceNum | uint64(KeyTypeValue)
+
+func init() {
+	binary.PutUvarint(kMaxNumBytes, kMaxNum)
+}
+
 type InternalKey []byte
 
 func (ik InternalKey) assert() {
-	if len(ik) < 8 {
-		panic("invalid internal key")
-	}
+	_, _, _, err := parseInternalKey(ik)
+	utils.Assert(err == nil, fmt.Sprintf("internal key parse failed, err=%v", err))
 }
 
 func (ik InternalKey) UserKey() []byte {

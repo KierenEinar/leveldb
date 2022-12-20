@@ -7,7 +7,6 @@ import (
 	"leveldb/comparer"
 	"leveldb/errors"
 	"leveldb/filter"
-	"leveldb/ikey"
 	"leveldb/iterator"
 	"leveldb/storage"
 	"leveldb/utils"
@@ -201,7 +200,7 @@ type TableReader struct {
 	indexBlock  *dataBlock
 	indexBH     blockHandle
 	metaIndexBH blockHandle
-	iFilter     filter.IFilter
+	iFilter     filter.IFilter // todo get filter
 	cmp         comparer.BasicComparer
 }
 
@@ -219,8 +218,8 @@ func NewTableReader(r storage.Reader, fileSize int, cmp comparer.BasicComparer) 
 				_ = r.Close()
 			},
 		},
-		iFilter: filter.DefaultFilter,
-		cmp:     cmp,
+		//iFilter: iFilter,
+		cmp: cmp,
 	}
 	err = tr.readFooter()
 	if err != nil {
@@ -426,9 +425,8 @@ func (tr *TableReader) Get(key []byte) (value []byte, err error) {
 		return
 	}
 
-	if bytes.Compare(ikey.InternalKey(rKey).UserKey(), ikey.InternalKey(key).UserKey()) != 0 {
+	if tr.cmp.Compare(rKey, key) != 0 {
 		err = errors.ErrNotFound
-		return
 	}
 
 	return value, nil
@@ -526,7 +524,7 @@ func (tr *TableReader) readFilterBlock(bh blockHandle) (*filterBlock, error) {
 	}, nil
 }
 
-func (filterBlock *filterBlock) mayContains(iFilter filter.IFilter, bh blockHandle, ikey ikey.InternalKey) bool {
+func (filterBlock *filterBlock) mayContains(iFilter filter.IFilter, bh blockHandle, ikey []byte) bool {
 
 	idx := int(bh.offset / 1 << filterBlock.baseLg)
 	if idx+1 > filterBlock.filterNums {
@@ -536,5 +534,5 @@ func (filterBlock *filterBlock) mayContains(iFilter filter.IFilter, bh blockHand
 	offsetN := filterBlock.offsets[idx]
 	offsetM := filterBlock.offsets[idx+1]
 	filter := filterBlock.data[offsetN:offsetM]
-	return iFilter.MayContains(filter, ikey.UserKey())
+	return iFilter.MayContains(filter, ikey)
 }
