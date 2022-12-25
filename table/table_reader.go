@@ -37,12 +37,12 @@ type blockContent struct {
 
 type dataBlock struct {
 	cmp                comparer.Comparer
-	blockContent       *blockContent
+	blockContent       blockContent
 	restartPointOffset int
 	restartPointNums   int
 }
 
-func newDataBlock(blockContent *blockContent, cmp comparer.Comparer) (*dataBlock, error) {
+func newDataBlock(blockContent blockContent, cmp comparer.Comparer) (*dataBlock, error) {
 	data := blockContent.data
 	dataLen := len(data)
 	if dataLen < 4 {
@@ -113,10 +113,10 @@ type blockIter struct {
 	dummyCleanNode cleanUpNode
 }
 
-func newBlockIter(dataBlock *dataBlock) *blockIter {
+func newBlockIter(dataBlock *dataBlock, cmp comparer.Comparer) *blockIter {
 	bi := &blockIter{
 		dataBlock: dataBlock,
-		cmp:       dataBlock.cmp,
+		cmp:       cmp,
 	}
 	br := &utils.BasicReleaser{
 		OnClose: func() {
@@ -211,16 +211,20 @@ type Reader struct {
 	cacheId     uint64
 }
 
-func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize int) (*Reader, error) {
+func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize int) (reader *Reader, err error) {
 	var (
 		footerBlockContent blockContent
+		indexBlockContent  blockContent
 		footer             = make([]byte, kTableFooterLen)
 		footerData         *[]byte
+		indexBlock         *dataBlock
 	)
-	_, err := r.Pread(int64(fileSize-kTableFooterLen), &footerData, &footer)
+
+	_, err = r.Pread(int64(fileSize-kTableFooterLen), &footerData, &footer)
 	if err != nil {
-		return nil, err
+		return
 	}
+
 	tr := &Reader{
 		r:         r,
 		tableSize: fileSize,
@@ -232,53 +236,56 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 
 		filter: opt.InternalFilter,
 		cmp:    opt.InternalComparer,
+		opt:    opt,
 	}
 	footerBlockContent.data = *footerData
 	err = tr.readFooter(footerBlockContent)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	var (
-		indexBlockData    *[]byte
-		indexBlockScratch = utils.PoolGetBytes(int(tr.indexBH.length) + kBlockTailLen)
-	)
-
-	_, err = r.Pread(int64(tr.indexBH.offset), &indexBlockData, indexBlockScratch)
+	indexBlockContent, err = tr.readBlock(tr.indexBH)
 	if err != nil {
-		utils.PoolPutBytes(indexBlockScratch)
-		return nil, err
+		return
 	}
 
-	metaIndexData := make([]byte, tr.metaIndexBH.length)
-	_, err = r.ReadAt(metaIndexData, int64(tr.metaIndexBH.offset))
+	indexBlock, err = newDataBlock(indexBlockContent, tr.cmp)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	metaBlock, err := newDataBlock(metaIndexData, cmp)
-	if err != nil {
-		return nil, err
+	tr.indexBlock = indexBlock
+	err = tr.readMeta()
+	return
+}
+
+func (tr *Reader) readMeta() (err error) {
+
+	if tr.opt.InternalFilter == nil {
+		return
 	}
-	defer metaBlock.UnRef()
 
-	metaIter := newBlockIter(metaBlock)
-	defer metaIter.UnRef()
+	var metaContent blockContent
 
-	for metaIter.Next() {
-		k := metaIter.Key()
-		if len(k) > 0 && bytes.Compare(k, []byte("filter.bloomFilter")) == 0 {
-			_, bh := readBH(metaIter.Value())
-			tr.filterBlock, err = tr.readFilterBlock(bh)
-			if err != nil {
-				return nil, err
+	defer func() {
+		if metaContent.poolable {
+			utils.PoolPutBytes(&metaContent.data)
+		}
+	}()
+
+	metaContent, err = tr.readBlock(tr.metaIndexBH)
+	if err == nil {
+		block, err := newDataBlock(metaContent, comparer.DefaultComparer)
+		key := "filter." + tr.opt.InternalFilter.Name()
+		if err == nil {
+
+			iter := newBlockIter(block, comparer.DefaultComparer)
+			if iter.Seek([]byte(key)) && iter.Valid() != nil {
+				tr.readFilter(iter.Value())
 			}
 		}
 	}
-
-	tr.Ref()
-
-	return tr, nil
+	return err
 }
 
 func (tr *Reader) readFooter(footerContent blockContent) error {
@@ -302,6 +309,7 @@ func (tr *Reader) readBlock(bh blockHandle) (content blockContent, err error) {
 	var result *[]byte
 	_, err = tr.r.Pread(int64(bh.offset), &result, scratch)
 	if err != nil {
+		utils.PoolPutBytes(scratch)
 		return
 	}
 	data := *result
@@ -337,9 +345,9 @@ func (tr *Reader) readBlock(bh blockHandle) (content blockContent, err error) {
 		content.data = unCompressedData
 		content.cacheable = true
 		content.poolable = true
-		utils.PoolPutBytes(scratch)
 	default:
 		err = errors.NewErrCorruption("data block compression type corrupt")
+		utils.PoolPutBytes(scratch)
 	}
 	return
 }
@@ -372,7 +380,7 @@ func (tr *Reader) blockReader(blockHandleValue []byte) (iter iterator.Iterator, 
 		}
 	}
 
-	dataBlock, err := newDataBlock(&content, tr.opt.InternalComparer)
+	dataBlock, err := newDataBlock(content, tr.opt.InternalComparer)
 	if err != nil {
 		if content.poolable {
 			utils.PoolPutBytes(&content.data)
@@ -380,7 +388,7 @@ func (tr *Reader) blockReader(blockHandleValue []byte) (iter iterator.Iterator, 
 		return
 	}
 
-	blockIter := newBlockIter(dataBlock)
+	blockIter := newBlockIter(dataBlock, tr.cmp)
 	if handle != nil {
 		registerCleanUp(&blockIter.dummyCleanNode, releaseHandle, tr.opt.BlockCache, handle)
 	} else {
