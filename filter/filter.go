@@ -12,6 +12,7 @@ var (
 type IFilter interface {
 	MayContains(filter, key []byte) bool
 	NewGenerator() IFilterGenerator
+	Name() string
 }
 
 type IFilterGenerator interface {
@@ -55,6 +56,10 @@ func (bf BloomFilter) MayContains(filter, key []byte) bool {
 		h += delta
 	}
 	return true
+}
+
+func (bf *BloomFilter) Name() string {
+	return "bloomfilter"
 }
 
 func (bf *BloomFilterGenerator) AddKey(key []byte) {

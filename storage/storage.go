@@ -31,7 +31,9 @@ type ByteReader interface {
 }
 
 type RandomAccessReader interface {
-	io.ReaderAt
+	// Pread sets *result to the read data, may be point to scratch[:]
+	Pread(offset int64, result **[]byte, scratch *[]byte) (n int, err error)
+	io.Closer
 }
 
 type Flusher interface {
@@ -103,14 +105,12 @@ func OpenPath(dbPath string) (Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	fs := &FileStorage{
 		dbPath:      dbPath,
 		fileLock:    fileLock,
 		mmapLimiter: NewLimiter(int32(mmapOpenFile())),
 		fdLimiter:   NewLimiter(int32(maxOpenFile())),
 	}
-
 	runtime.SetFinalizer(fs, (*FileStorage).Close)
 	return fs, nil
 }
@@ -426,7 +426,7 @@ func (fs *FileStorage) Remove(fd Fd) error {
 
 func (fs *FileStorage) Rename(src Fd, target Fd) error {
 	srcPath := fs.filePath(src)
-	targetPath := fs.filePath(src)
+	targetPath := fs.filePath(target)
 	return os.Rename(srcPath, targetPath)
 }
 
@@ -454,7 +454,6 @@ func (fs *FileStorage) RemoveDir(dir string) (err error) {
 	if err != nil {
 		return
 	}
-
 	if !fInfo.IsDir() {
 		err = &os.PathError{
 			Op:   "RemoveDir",

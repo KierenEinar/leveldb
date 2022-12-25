@@ -4,36 +4,46 @@ import (
 	"bytes"
 	"encoding/binary"
 	"hash/crc32"
+	"leveldb/cache"
 	"leveldb/comparer"
 	"leveldb/errors"
 	"leveldb/filter"
 	"leveldb/iterator"
+	"leveldb/options"
 	"leveldb/storage"
 	"leveldb/utils"
 	"sort"
 )
 
-const blockTailLen = 5
-const tableFooterLen = 48
-
-type CompressionType uint8
+type compressionType uint8
 
 const (
-	compressionTypeNone   CompressionType = 0
-	compressionTypeSnappy CompressionType = 1
+	kCompressionTypeNone   compressionType = 0
+	kCompressionTypeSnappy compressionType = 1
+)
+
+const (
+	kBlockTailLen   = 5
+	kTableFooterLen = 48
 )
 
 var magicByte = []byte("\x57\xfb\x80\x8b\x24\x75\x47\xdb")
 
+type blockContent struct {
+	data      []byte
+	cacheable bool
+	poolable  bool
+}
+
 type dataBlock struct {
-	*utils.BasicReleaser
-	cmp                comparer.BasicComparer
-	data               []byte
+	cmp                comparer.Comparer
+	blockContent       *blockContent
 	restartPointOffset int
 	restartPointNums   int
 }
 
-func newDataBlock(data []byte, cmp comparer.BasicComparer) (*dataBlock, error) {
+func newDataBlock(blockContent *blockContent, cmp comparer.Comparer) (*dataBlock, error) {
+	data := blockContent.data
 	dataLen := len(data)
 	if dataLen < 4 {
 		return nil, errors.NewErrCorruption("block data corruption")
@@ -41,47 +51,45 @@ func newDataBlock(data []byte, cmp comparer.BasicComparer) (*dataBlock, error) {
 	restartPointNums := int(binary.LittleEndian.Uint32(data[len(data)-4:]))
 	restartPointOffset := len(data) - (restartPointNums+1)*4
 	block := &dataBlock{
-		data:               data,
+		blockContent:       blockContent,
 		restartPointNums:   restartPointNums,
 		restartPointOffset: restartPointOffset,
 		cmp:                cmp,
 	}
-	block.OnClose = block.Close
-	block.Ref()
 	return block, nil
 }
 
-func (br *dataBlock) entry(offset int) (entryLen, shareKeyLen int, unShareKey, value []byte, err error) {
-	if offset >= br.restartPointOffset {
+func (block *dataBlock) entry(offset int) (entryLen, shareKeyLen int, unShareKey, value []byte, err error) {
+	if offset >= block.restartPointOffset {
 		err = errors.ErrIterOutOfBounds
 		return
 	}
-	shareKeyLenU, n := binary.Uvarint(br.data[offset:])
+	shareKeyLenU, n := binary.Uvarint(block.blockContent.data[offset:])
 	shareKeyLen = int(shareKeyLenU)
-	unShareKeyLenU, m := binary.Uvarint(br.data[offset+n:])
+	unShareKeyLenU, m := binary.Uvarint(block.blockContent.data[offset+n:])
 	unShareKeyLen := int(unShareKeyLenU)
-	vLenU, k := binary.Uvarint(br.data[offset+n+m:])
+	vLenU, k := binary.Uvarint(block.blockContent.data[offset+n+m:])
 	vLen := int(vLenU)
-	unShareKey = br.data[offset+n+m+k : offset+n+m+k+unShareKeyLen]
-	value = br.data[offset+n+m+k+unShareKeyLen : offset+n+m+k+unShareKeyLen+vLen]
+	unShareKey = block.blockContent.data[offset+n+m+k : offset+n+m+k+unShareKeyLen]
+	value = block.blockContent.data[offset+n+m+k+unShareKeyLen : offset+n+m+k+unShareKeyLen+vLen]
 	entryLen = n + m + k + unShareKeyLen + vLen
 	return
 }
 
-func (br *dataBlock) readRestartPoint(restartPoint int) (unShareKey []byte) {
-	_, n := binary.Uvarint(br.data[restartPoint:])
-	unShareKeyLen, m := binary.Uvarint(br.data[restartPoint+n:])
-	_, k := binary.Uvarint(br.data[restartPoint+n+m:])
-	unShareKey = br.data[restartPoint+n+m+k : restartPoint+n+m+k+int(unShareKeyLen)]
+func (block *dataBlock) readRestartPoint(restartPoint int) (unShareKey []byte) {
+	_, n := binary.Uvarint(block.blockContent.data[restartPoint:])
+	unShareKeyLen, m := binary.Uvarint(block.blockContent.data[restartPoint+n:])
+	_, k := binary.Uvarint(block.blockContent.data[restartPoint+n+m:])
+	unShareKey = block.blockContent.data[restartPoint+n+m+k : restartPoint+n+m+k+int(unShareKeyLen)]
 	return
 }
 
-func (br *dataBlock) SeekRestartPoint(key []byte) int {
+func (block *dataBlock) seekRestartPoint(key []byte) int {
 
-	n := sort.Search(br.restartPointNums, func(i int) bool {
-		restartPoint := binary.LittleEndian.Uint32(br.data[br.restartPointOffset : br.restartPointOffset+i*4])
-		unShareKey := br.readRestartPoint(int(restartPoint))
-		result := br.cmp.Compare(unShareKey, key)
+	n := sort.Search(block.restartPointNums, func(i int) bool {
+		restartPoint := binary.LittleEndian.Uint32(block.blockContent.data[block.restartPointOffset : block.restartPointOffset+i*4])
+		unShareKey := block.readRestartPoint(int(restartPoint))
+		result := block.cmp.Compare(unShareKey, key)
 		return result > 0
 	})
 
@@ -92,24 +100,17 @@ func (br *dataBlock) SeekRestartPoint(key []byte) int {
 	return n - 1
 }
 
-func (br *dataBlock) Close() {
-	br.data = br.data[:0]
-	br.data = nil
-	br.restartPointNums = 0
-	br.restartPointOffset = 0
-}
-
 type blockIter struct {
 	*dataBlock
 	*utils.BasicReleaser
-	ref     int32
-	offset  int
-	prevKey []byte
-	dir     iterator.Direction
-	err     error
-	ikey    []byte
-	value   []byte
-	cmp     comparer.BasicComparer
+	cmp            comparer.Comparer
+	offset         int
+	prevKey        []byte
+	dir            iterator.Direction
+	err            error
+	ikey           []byte
+	value          []byte
+	dummyCleanNode cleanUpNode
 }
 
 func newBlockIter(dataBlock *dataBlock) *blockIter {
@@ -119,10 +120,14 @@ func newBlockIter(dataBlock *dataBlock) *blockIter {
 	}
 	br := &utils.BasicReleaser{
 		OnClose: func() {
-			dataBlock.UnRef()
 			bi.prevKey = nil
 			bi.ikey = nil
 			bi.value = nil
+			node := bi.dummyCleanNode.next
+			for node != nil {
+				node.doClean()
+				node = node.next
+			}
 		},
 	}
 	bi.BasicReleaser = br
@@ -139,7 +144,7 @@ func (bi *blockIter) SeekFirst() bool {
 
 func (bi *blockIter) Seek(key []byte) bool {
 
-	bi.offset = bi.SeekRestartPoint(key)
+	bi.offset = bi.seekRestartPoint(key)
 	bi.prevKey = bi.prevKey[:0]
 
 	for bi.Next() {
@@ -192,25 +197,31 @@ func (bi *blockIter) Value() []byte {
 	return bi.value
 }
 
-type TableReader struct {
+type Reader struct {
 	*utils.BasicReleaser
-	r           storage.Reader
+	r           storage.RandomAccessReader
 	tableSize   int
+	opt         *options.Options
 	filterBlock *filterBlock
 	indexBlock  *dataBlock
 	indexBH     blockHandle
 	metaIndexBH blockHandle
-	iFilter     filter.IFilter // todo get filter
-	cmp         comparer.BasicComparer
+	filter      filter.IFilter
+	cmp         comparer.Comparer
+	cacheId     uint64
 }
 
-func NewTableReader(r storage.Reader, fileSize int, cmp comparer.BasicComparer) (*TableReader, error) {
-	footer := make([]byte, tableFooterLen)
-	_, err := r.ReadAt(footer, int64(fileSize-tableFooterLen))
+func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize int) (*Reader, error) {
+	var (
+		footerBlockContent blockContent
+		footer             = make([]byte, kTableFooterLen)
+		footerData         *[]byte
+	)
+	_, err := r.Pread(int64(fileSize-kTableFooterLen), &footerData, &footer)
 	if err != nil {
 		return nil, err
 	}
-	tr := &TableReader{
+	tr := &Reader{
 		r:         r,
 		tableSize: fileSize,
 		BasicReleaser: &utils.BasicReleaser{
@@ -218,13 +229,27 @@ func NewTableReader(r storage.Reader, fileSize int, cmp comparer.BasicComparer) 
 				_ = r.Close()
 			},
 		},
-		//iFilter: iFilter,
-		cmp: cmp,
+
+		filter: opt.InternalFilter,
+		cmp:    opt.InternalComparer,
 	}
-	err = tr.readFooter()
+	footerBlockContent.data = *footerData
+	err = tr.readFooter(footerBlockContent)
 	if err != nil {
 		return nil, err
 	}
+
+	var (
+		indexBlockData    *[]byte
+		indexBlockScratch = utils.PoolGetBytes(int(tr.indexBH.length) + kBlockTailLen)
+	)
+
+	_, err = r.Pread(int64(tr.indexBH.offset), &indexBlockData, indexBlockScratch)
+	if err != nil {
+		utils.PoolPutBytes(indexBlockScratch)
+		return nil, err
+	}
+
 	metaIndexData := make([]byte, tr.metaIndexBH.length)
 	_, err = r.ReadAt(metaIndexData, int64(tr.metaIndexBH.offset))
 	if err != nil {
@@ -256,30 +281,120 @@ func NewTableReader(r storage.Reader, fileSize int, cmp comparer.BasicComparer) 
 	return tr, nil
 }
 
-func (tableReader *TableReader) readFooter() error {
-	footer := make([]byte, tableFooterLen)
-	_, err := tableReader.r.ReadAt(footer, int64(tableReader.tableSize-tableFooterLen))
-	if err != nil {
-		return err
-	}
+func (tr *Reader) readFooter(footerContent blockContent) error {
 
-	magic := footer[40:]
+	footerData := footerContent.data
+	magic := footerData[40:]
 	if bytes.Compare(magic, magicByte) != 0 {
 		return errors.NewErrCorruption("footer decode failed")
 	}
 
-	bhLen, indexBH := readBH(footer)
-	tableReader.indexBH = indexBH
+	bhLen, indexBH := readBH(footerData)
+	tr.indexBH = indexBH
 
-	_, tableReader.metaIndexBH = readBH(footer[bhLen:])
+	_, tr.metaIndexBH = readBH(footerData[bhLen:])
 	return nil
 }
 
+func (tr *Reader) readBlock(bh blockHandle) (content blockContent, err error) {
+
+	scratch := utils.PoolGetBytes(int(bh.length) + kBlockTailLen)
+	var result *[]byte
+	_, err = tr.r.Pread(int64(bh.offset), &result, scratch)
+	if err != nil {
+		return
+	}
+	data := *result
+	blockContentLen := int(bh.length)
+
+	compressType := data[blockContentLen]
+	checkSum := binary.LittleEndian.Uint32(data[blockContentLen+1:])
+
+	if tr.opt.VerifyCheckSum {
+		if crc32.ChecksumIEEE(data[:blockContentLen]) != checkSum {
+			utils.PoolPutBytes(scratch)
+			err = errors.NewErrCorruption("invalid checksum")
+			return
+		}
+	}
+
+	switch compressionType(compressType) {
+	case kCompressionTypeNone:
+		content.data = data
+		if result != scratch { // don't need double cache
+			utils.PoolPutBytes(scratch)
+		} else {
+			content.cacheable = true
+			content.poolable = true
+		}
+	case kCompressionTypeSnappy:
+
+		unCompressedData, unCompressErr := snappyUnCompressed(data)
+		if unCompressErr != nil {
+			err = unCompressErr
+			return
+		}
+		content.data = unCompressedData
+		content.cacheable = true
+		content.poolable = true
+		utils.PoolPutBytes(scratch)
+	default:
+		err = errors.NewErrCorruption("data block compression type corrupt")
+	}
+	return
+}
+
+func (tr *Reader) blockReader(blockHandleValue []byte) (iter iterator.Iterator, err error) {
+	_, bh := readBH(blockHandleValue)
+	var (
+		content blockContent
+		handle  *cache.LRUHandle
+	)
+	if tr.opt.BlockCache != nil {
+		cacheKey := *utils.PoolGetBytes(16)
+		binary.LittleEndian.PutUint64(cacheKey[:8], tr.cacheId)
+		binary.LittleEndian.PutUint64(cacheKey[8:], bh.offset)
+
+		handle = tr.opt.BlockCache.Lookup(cacheKey)
+		if handle == nil {
+			if content, err = tr.readBlock(bh); err != nil {
+				return
+			}
+			if content.cacheable {
+				handle = tr.opt.BlockCache.Insert(cacheKey, uint32(len(content.data)), &content, func(key []byte, value interface{}) {
+					releaseContent(value)
+				})
+			}
+		}
+	} else {
+		if content, err = tr.readBlock(bh); err != nil {
+			return
+		}
+	}
+
+	dataBlock, err := newDataBlock(&content, tr.opt.InternalComparer)
+	if err != nil {
+		if content.poolable {
+			utils.PoolPutBytes(&content.data)
+		}
+		return
+	}
+
+	blockIter := newBlockIter(dataBlock)
+	if handle != nil {
+		registerCleanUp(&blockIter.dummyCleanNode, releaseHandle, tr.opt.BlockCache, handle)
+	} else {
+		registerCleanUp(&blockIter.dummyCleanNode, releaseContent, &content)
+	}
+
+	return
+}
+
 // todo used cache
-func (tr *TableReader) readRawBlock(bh blockHandle) (*dataBlock, error) {
+func (tr *Reader) readRawBlock(bh blockHandle) (*dataBlock, error) {
 	r := tr.r
 
-	data := make([]byte, bh.length+blockTailLen)
+	data := make([]byte, bh.length+kBlockTailLen)
 
 	n, err := r.ReadAt(data, int64(bh.offset))
 	if err != nil {
@@ -292,14 +407,14 @@ func (tr *TableReader) readRawBlock(bh blockHandle) (*dataBlock, error) {
 
 	rawData := data[:n-5]
 	checkSum := binary.LittleEndian.Uint32(data[n-5 : n-1])
-	compressionType := CompressionType(data[n-1])
+	compressionType := compressionType(data[n-1])
 
 	if crc32.ChecksumIEEE(rawData) != checkSum {
 		return nil, errors.NewErrCorruption("checksum failed")
 	}
 
 	switch compressionType {
-	case compressionTypeNone:
+	case kCompressionTypeNone:
 	default:
 		return nil, errors.ErrUnSupportCompressionType
 	}
@@ -311,7 +426,7 @@ func (tr *TableReader) readRawBlock(bh blockHandle) (*dataBlock, error) {
 	return block, nil
 }
 
-func (tr *TableReader) getIndexBlock() (b *dataBlock, err error) {
+func (tr *Reader) getIndexBlock() (b *dataBlock, err error) {
 
 	defer func() {
 		if b != nil {
@@ -331,7 +446,7 @@ func (tr *TableReader) getIndexBlock() (b *dataBlock, err error) {
 }
 
 // Seek return gte key
-func (tr *TableReader) find(key []byte, noValue bool, filtered bool) (ikey []byte, value []byte, err error) {
+func (tr *Reader) find(key []byte, noValue bool, filtered bool) (ikey []byte, value []byte, err error) {
 	indexBlock, err := tr.getIndexBlock()
 	if err != nil {
 		return
@@ -349,7 +464,7 @@ func (tr *TableReader) find(key []byte, noValue bool, filtered bool) (ikey []byt
 	_, blockHandle := readBH(indexBlockIter.Value())
 
 	if filtered {
-		contains := tr.filterBlock.mayContains(tr.iFilter, blockHandle, key)
+		contains := tr.filterBlock.mayContains(tr.filter, blockHandle, key)
 		if !contains {
 			err = errors.ErrNotFound
 			return
@@ -409,16 +524,16 @@ func (tr *TableReader) find(key []byte, noValue bool, filtered bool) (ikey []byt
 	return
 }
 
-func (tr *TableReader) Find(key []byte) (rKey []byte, value []byte, err error) {
+func (tr *Reader) Find(key []byte) (rKey []byte, value []byte, err error) {
 	return tr.find(key, false, true)
 }
 
-func (tr *TableReader) FindKey(key []byte) (rKey []byte, err error) {
+func (tr *Reader) FindKey(key []byte) (rKey []byte, err error) {
 	rKey, _, err = tr.find(key, true, true)
 	return
 }
 
-func (tr *TableReader) Get(key []byte) (value []byte, err error) {
+func (tr *Reader) Get(key []byte) (value []byte, err error) {
 
 	rKey, value, err := tr.find(key, false, true)
 	if err != nil {
@@ -432,7 +547,7 @@ func (tr *TableReader) Get(key []byte) (value []byte, err error) {
 	return value, nil
 }
 
-func (tr *TableReader) NewIterator() (iterator.Iterator, error) {
+func (tr *Reader) NewIterator() (iterator.Iterator, error) {
 	indexer, err := newIndexIter(tr)
 	if err != nil {
 		return nil, err
@@ -442,11 +557,11 @@ func (tr *TableReader) NewIterator() (iterator.Iterator, error) {
 
 type indexIter struct {
 	*blockIter
-	tr *TableReader
+	tr *Reader
 	*utils.BasicReleaser
 }
 
-func newIndexIter(tr *TableReader) (*indexIter, error) {
+func newIndexIter(tr *Reader) (*indexIter, error) {
 	indexBlock, err := tr.getIndexBlock()
 	if err != nil {
 		return nil, err
@@ -494,7 +609,7 @@ type filterBlock struct {
 	filterNums   int
 }
 
-func (tr *TableReader) readFilterBlock(bh blockHandle) (*filterBlock, error) {
+func (tr *Reader) readFilterBlock(bh blockHandle) (*filterBlock, error) {
 
 	dataBlock, err := tr.readRawBlock(bh)
 	if err != nil {
@@ -535,4 +650,52 @@ func (filterBlock *filterBlock) mayContains(iFilter filter.IFilter, bh blockHand
 	offsetM := filterBlock.offsets[idx+1]
 	filter := filterBlock.data[offsetN:offsetM]
 	return iFilter.MayContains(filter, ikey)
+}
+
+func snappyUnCompressed(data []byte) (decodeData []byte, err error) {
+	panic("implement me...")
+}
+
+func releaseHandle(args ...interface{}) {
+	utils.Assert(len(args) == 2, "releaseHandle args len not eq 2")
+	c, ok := args[0].(cache.Cache)
+	utils.Assert(ok, "releaseHandle arg1 convert to Cache failed")
+	handle, ok := args[1].(*cache.LRUHandle)
+	utils.Assert(ok, "releaseHandle arg2 convert to *LRUHandle failed")
+	c.UnRef(handle)
+}
+
+func releaseContent(args ...interface{}) {
+	utils.Assert(len(args) == 1, "releaseContent args len not eq 1")
+	content, ok := args[0].(*blockContent)
+	utils.Assert(ok, "releaseContent arg1 convert to *blockContent failed")
+	if content.poolable {
+		utils.PoolPutBytes(&content.data)
+	}
+}
+
+type cleanUpNode struct {
+	next *cleanUpNode
+	f    func(args ...interface{})
+	args []interface{}
+}
+
+func registerCleanUp(node *cleanUpNode, f func(args ...interface{}), args ...interface{}) {
+	nextNode := &cleanUpNode{
+		f:    f,
+		args: args,
+	}
+	if node.next != nil {
+		nextNode.next = node.next
+	}
+	node.next = nextNode
+	return
+}
+
+func (node *cleanUpNode) doClean() {
+	n := node
+	for n != nil {
+		n.f(n.args...)
+		n = node.next
+	}
 }

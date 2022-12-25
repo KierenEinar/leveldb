@@ -16,6 +16,7 @@ type Cache interface {
 	Prune()
 	Close()
 	UnRef(h *LRUHandle)
+	//NewId() uint64
 }
 
 type LRUHandle struct {

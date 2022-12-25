@@ -3,7 +3,7 @@ package leveldb
 import (
 	"bytes"
 	"leveldb/comparer"
-	"leveldb/config"
+	"leveldb/options"
 	"leveldb/utils"
 	"sort"
 	"sync/atomic"
@@ -31,7 +31,7 @@ type compaction1 struct {
 	tableOperation *tableOperation
 	edit           VersionEdit
 
-	baseLevelI [config.KLevelNum]int
+	baseLevelI [options.KLevelNum]int
 }
 
 func (vSet *VersionSet) pickCompaction1() *compaction1 {
@@ -42,7 +42,7 @@ func (vSet *VersionSet) pickCompaction1() *compaction1 {
 	}
 
 	cLevel := vSet.current.cLevel
-	utils.Assert(cLevel < config.KLevelNum)
+	utils.Assert(cLevel < options.KLevelNum)
 
 	level := vSet.current.levels[cLevel]
 

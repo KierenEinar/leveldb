@@ -331,14 +331,14 @@ func (tableWriter *TableWriter) Close() error {
 	// flush meta block
 	metaBlock := tableWriter.metaBlock
 	metaBlock.append([]byte("filter.bloomFilter"), writeBH(nil, *bh))
-	metaBH, err := tableWriter.writeBlock(&metaBlock.data, compressionTypeNone)
+	metaBH, err := tableWriter.writeBlock(&metaBlock.data, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
 
 	// flush index block
 	indexBlock := tableWriter.indexBlock
-	indexBH, err := tableWriter.writeBlock(&indexBlock.data, compressionTypeNone)
+	indexBH, err := tableWriter.writeBlock(&indexBlock.data, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func (tableWriter *TableWriter) Close() error {
 
 func (tableWriter *TableWriter) finishDataBlock() error {
 
-	bh, err := tableWriter.writeBlock(&tableWriter.dataBlock.data, compressionTypeNone)
+	bh, err := tableWriter.writeBlock(&tableWriter.dataBlock.data, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
@@ -374,14 +374,14 @@ func (tableWriter *TableWriter) finishFilterBlock() (*blockHandle, error) {
 		binary.LittleEndian.PutUint32(offsetBuf, uint32(offset))
 		filterWriter.data.Write(offsetBuf)
 	}
-	bh, err := tableWriter.writeBlock(&filterWriter.data, compressionTypeNone)
+	bh, err := tableWriter.writeBlock(&filterWriter.data, kCompressionTypeNone)
 	if err != nil {
 		return nil, err
 	}
 	return bh, nil
 }
 
-func (tableWriter *TableWriter) writeBlock(buf *bytes.Buffer, compressionType CompressionType) (*blockHandle, error) {
+func (tableWriter *TableWriter) writeBlock(buf *bytes.Buffer, compressionType compressionType) (*blockHandle, error) {
 
 	w := tableWriter.writer
 	offset := tableWriter.offset
@@ -428,7 +428,7 @@ func (tableWriter *TableWriter) flushPendingBH(ikey []byte) error {
 }
 
 func (tableWriter *TableWriter) flushFooter(indexBH, metaBH blockHandle) error {
-	footer := make([]byte, tableFooterLen)
+	footer := make([]byte, kTableFooterLen)
 	n1 := copy(footer, writeBH(nil, indexBH))
 	_ = copy(footer[n1:], writeBH(nil, metaBH))
 	copy(footer[40:], magicByte)
@@ -443,7 +443,7 @@ func (tableWriter *TableWriter) flushFooter(indexBH, metaBH blockHandle) error {
 		return err
 	}
 
-	tableWriter.offset += tableFooterLen
+	tableWriter.offset += kTableFooterLen
 	return nil
 }
 

@@ -2,9 +2,7 @@ package leveldb
 
 import (
 	"bytes"
-	"encoding/binary"
-	"errors"
-	"leveldb/config"
+	"leveldb/options"
 	"leveldb/storage"
 	"leveldb/utils"
 	"sort"
@@ -26,7 +24,7 @@ func (sf tFiles) size() (size int) {
 	return
 }
 
-type Levels [config.KLevelNum]tFiles
+type Levels [options.KLevelNum]tFiles
 
 func (s tFile) isOverlapped(umin []byte, umax []byte) bool {
 	smin, smax := s.iMin.UserKey(), s.iMax.UserKey()

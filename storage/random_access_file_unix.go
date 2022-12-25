@@ -48,12 +48,15 @@ func newPosixMMAPReadableFile(fs *FileStorage, fd int, fileSize int, limiter *Li
 	return mmapReaderFile, nil
 }
 
-func (mmap *posixMMAPReadableFile) ReadAt(p []byte, off int64) (n int, err error) {
-	if int(off) > len(mmap.data) {
+func (mmap *posixMMAPReadableFile) Pread(offset int64, result **[]byte, scratch *[]byte) (n int, err error) {
+	if int(offset) > len(mmap.data) {
 		err = errors.New("error mmap off position read out of bounds")
 		return
 	}
-	n = copy(p[:], mmap.data[off:])
+	length := len(*scratch)
+	data := mmap.data[offset : offset+int64(length)]
+	*result = &data
+	n = len(data)
 	return
 }
 
@@ -99,7 +102,7 @@ func (r *posixRandomAccessFileReader) Close() error {
 	return nil
 }
 
-func (r *posixRandomAccessFileReader) ReadAt(p []byte, off int64) (n int, err error) {
+func (r *posixRandomAccessFileReader) Pread(offset int64, result **[]byte, scratch *[]byte) (n int, err error) {
 	fd := r.fd
 	if !r.hasPermanent {
 		oFd, oErr := syscall.Open(r.filePath, syscall.O_RDONLY, 0644)
@@ -113,8 +116,12 @@ func (r *posixRandomAccessFileReader) ReadAt(p []byte, off int64) (n int, err er
 			r.fd = -1
 		}()
 	}
-	runtime.KeepAlive(p)
-	return syscall.Pread(fd, p, off)
+	runtime.KeepAlive(*scratch)
+	n, err = syscall.Pread(fd, *scratch, offset)
+	if err == nil {
+		*result = scratch
+	}
+	return
 }
 
 func (fs *FileStorage) newRandomAccessFile(fileDesc Fd) (r RandomAccessReader, err error) {
