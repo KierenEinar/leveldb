@@ -199,16 +199,15 @@ func (bi *blockIter) Value() []byte {
 
 type Reader struct {
 	*utils.BasicReleaser
-	r           storage.RandomAccessReader
-	tableSize   int
-	opt         *options.Options
-	filterBlock *filterBlock
-	indexBlock  *dataBlock
-	indexBH     blockHandle
-	metaIndexBH blockHandle
-	filter      filter.IFilter
-	cmp         comparer.Comparer
-	cacheId     uint64
+	r                 storage.RandomAccessReader
+	tableSize         int
+	opt               *options.Options
+	filterBlockReader *filterBlockReader
+	indexBlock        *dataBlock
+	indexBH           blockHandle
+	metaIndexBH       blockHandle
+	cmp               comparer.Comparer
+	cacheId           uint64
 }
 
 func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize int) (reader *Reader, err error) {
@@ -228,16 +227,13 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 	tr := &Reader{
 		r:         r,
 		tableSize: fileSize,
-		BasicReleaser: &utils.BasicReleaser{
-			OnClose: func() {
-				_ = r.Close()
-			},
-		},
-
-		filter: opt.InternalFilter,
-		cmp:    opt.InternalComparer,
-		opt:    opt,
+		cmp:       opt.InternalComparer,
+		opt:       opt,
 	}
+	tr.BasicReleaser = &utils.BasicReleaser{
+		OnClose: tr.Close,
+	}
+
 	footerBlockContent.data = *footerData
 	err = tr.readFooter(footerBlockContent)
 	if err != nil {
@@ -261,7 +257,7 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 
 func (tr *Reader) readMeta() (err error) {
 
-	if tr.opt.InternalFilter == nil {
+	if tr.opt.FilterPolicy == nil {
 		return
 	}
 
@@ -276,7 +272,7 @@ func (tr *Reader) readMeta() (err error) {
 	metaContent, err = tr.readBlock(tr.metaIndexBH)
 	if err == nil {
 		block, err := newDataBlock(metaContent, comparer.DefaultComparer)
-		key := "filter." + tr.opt.InternalFilter.Name()
+		key := "filterPolicy." + tr.opt.FilterPolicy.Name()
 		if err == nil {
 
 			iter := newBlockIter(block, comparer.DefaultComparer)
@@ -472,7 +468,7 @@ func (tr *Reader) find(key []byte, noValue bool, filtered bool) (ikey []byte, va
 	_, blockHandle := readBH(indexBlockIter.Value())
 
 	if filtered {
-		contains := tr.filterBlock.mayContains(tr.filter, blockHandle, key)
+		contains := tr.filterBlock.mayContains(tr.filterPolicy, blockHandle, key)
 		if !contains {
 			err = errors.ErrNotFound
 			return
@@ -563,6 +559,19 @@ func (tr *Reader) NewIterator() (iterator.Iterator, error) {
 	return iterator.NewIndexedIterator(indexer), nil
 }
 
+func (tr *Reader) Close() {
+	if tr.indexBlock != nil {
+		if tr.indexBlock.blockContent.poolable {
+			utils.PoolPutBytes(&tr.indexBlock.blockContent.data)
+		}
+	}
+	if tr.filterBlockReader != nil {
+		if tr.filterBlockReader.filterData.poolable {
+			utils.PoolPutBytes(&tr.filterBlockReader.filterData.data)
+		}
+	}
+}
+
 type indexIter struct {
 	*blockIter
 	tr *Reader
@@ -609,55 +618,66 @@ func (indexIter *indexIter) Get() iterator.Iterator {
 
 }
 
-type filterBlock struct {
-	data         []byte
-	offsetOffset int
-	offsets      []int
-	baseLg       uint8
-	filterNums   int
+type filterBlockReader struct {
+	baseLg        uint8
+	offsetsOffset uint32
+	blockNum      uint32
+	filterPolicy  filter.IFilter
+	filterData    blockContent
 }
 
-func (tr *Reader) readFilterBlock(bh blockHandle) (*filterBlock, error) {
-
-	dataBlock, err := tr.readRawBlock(bh)
+func (r *Reader) newFilterBlockReader(bh blockHandle, filterPolicy filter.IFilter) (
+	fReader *filterBlockReader, err error) {
+	blockContent, err := r.readBlock(bh)
 	if err != nil {
-		return nil, err
+		return
+	}
+	n := len(blockContent.data)
+	if n < 5 {
+		err = errors.NewErrCorruption("filterPolicy data len less than 5")
+		return
 	}
 
-	dataLen := len(dataBlock.data)
-
-	baseLg := dataBlock.data[dataLen-1]
-	lastOffsetB := dataBlock.data[dataLen-5:]
-
-	lastOffset := int(binary.LittleEndian.Uint32(lastOffsetB))
-	nums := (dataLen - lastOffset - 1) / 4
-
-	offsets := make([]int, 0, nums)
-	for i := 0; i < nums; i++ {
-		offsets = append(offsets, int(binary.LittleEndian.Uint32(dataBlock.data[lastOffset+i*4:])))
+	offsetsOffset := binary.LittleEndian.Uint32(blockContent.data[n-5 : n-1])
+	if offsetsOffset > uint32(n)-5 {
+		err = errors.NewErrCorruption("filterPolicy data offset's offset")
+		return
 	}
 
-	filter := dataBlock.data[:lastOffset]
-	return &filterBlock{
-		data:         filter,
-		offsetOffset: lastOffset,
-		offsets:      offsets,
-		baseLg:       baseLg,
-		filterNums:   nums - 1,
-	}, nil
+	baseLg := blockContent.data[n-1]
+	blockNum := (uint32(n)-1-offsetsOffset)/4 - 1
+	fReader = &filterBlockReader{
+		baseLg:        baseLg,
+		offsetsOffset: offsetsOffset,
+		blockNum:      blockNum,
+		filterPolicy:  filterPolicy,
+		filterData:    blockContent,
+	}
+
+	return
 }
 
-func (filterBlock *filterBlock) mayContains(iFilter filter.IFilter, bh blockHandle, ikey []byte) bool {
+func (fReader *filterBlockReader) mayContains(key, filter []byte, blockOffset uint32) bool {
+	index := blockOffset / (1 << fReader.baseLg)
+	start := fReader.offsetsOffset + index*4
+	end := fReader.offsetsOffset + (index+1)*4
 
-	idx := int(bh.offset / 1 << filterBlock.baseLg)
-	if idx+1 > filterBlock.filterNums {
-		return false
+	i := binary.LittleEndian.Uint32(fReader.filterData.data[start : start+4])
+	j := binary.LittleEndian.Uint32(fReader.filterData.data[end : end+4])
+	return fReader.filterPolicy.MayContains(key, filter[i:j])
+}
+
+func (r *Reader) readFilter(bhValue []byte) {
+	_, metaBh := readBH(bhValue)
+
+	filterBlockReader, err := r.newFilterBlockReader(metaBh, r.opt.FilterPolicy)
+	if err != nil {
+		// todo logger
+		// if failed, just return
+		return
 	}
-
-	offsetN := filterBlock.offsets[idx]
-	offsetM := filterBlock.offsets[idx+1]
-	filter := filterBlock.data[offsetN:offsetM]
-	return iFilter.MayContains(filter, ikey)
+	r.filterBlockReader = filterBlockReader
+	return
 }
 
 func snappyUnCompressed(data []byte) (decodeData []byte, err error) {

@@ -10,7 +10,7 @@ var (
 )
 
 type IFilter interface {
-	MayContains(filter, key []byte) bool
+	MayContains(key, filter []byte) bool
 	NewGenerator() IFilterGenerator
 	Name() string
 }
@@ -39,7 +39,7 @@ func (bf BloomFilter) NewGenerator() IFilterGenerator {
 	}
 }
 
-func (bf BloomFilter) MayContains(filter, key []byte) bool {
+func (bf BloomFilter) MayContains(key, filter []byte) bool {
 
 	bloomData := filter[:len(filter)-1]
 

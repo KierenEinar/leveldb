@@ -24,10 +24,10 @@ sstable detail
 	|			data block n         |
 	/--------------------------------/
 	/--------------------------------/
-	|		meta block (filter)      |
+	|		meta block (filterPolicy)      |
 	/--------------------------------/
 	/--------------------------------/
-	| meta index block (filter type) |
+	| meta index block (filterPolicy type) |
 	/--------------------------------/
 	/--------------------------------/
 	|	      index block            |
@@ -59,19 +59,19 @@ meta block (each data block's would be in offset [k, k+1]  )
 
 	of0		   of1        of2        of3        data offset's offset
 	/----------/----------/----------/----------/-----/-----/-----/-----/-----/----/
-	| filter 0 | filter 1 | filter 2 | filter 3 | of0 | of1 | of2 | of3 | dof | lg |
+	| filterPolicy 0 | filterPolicy 1 | filterPolicy 2 | filterPolicy 3 | of0 | of1 | of2 | of3 | dof | lg |
 	/----------/----------/----------/----------/-----/-----/-----/-----/-----/----/
 
 e.g.
    	data block.. 			0      1      2               	  3                    		4
 					    /------/------/------/----------------------------------/----------------/
 
-	filter partition...
+	filterPolicy partition...
 						/---------------/----------------/---------------/----------------/--------------/
 
-	filter data...             filter 0                      filter 1               filter 2
+	filterPolicy data...             filterPolicy 0                      filterPolicy 1               filterPolicy 2
 					   /--------------------/----------------------------------/----------------/
-	filter offset 	   0                  2500							     7000              9000
+	filterPolicy offset 	   0                  2500							     7000              9000
 						  0      1     2      3 	 4(offset's offset)
 					  /------/------/------/------/------/
 	value				 0     2500   7000   7000   9000
@@ -79,7 +79,7 @@ e.g.
 meta index block
 
 	/---------------------/------------------------/
-	|  key(filter.bloom)  |		block handle       |
+	|  key(filterPolicy.bloom)  |		block handle       |
 	/---------------------/------------------------/
 
 footer
@@ -203,12 +203,12 @@ func (fw *FilterWriter) flush(offset int) {
 	data block.. 			0      1      2               	  3                    		4
 					    /------/------/------/----------------------------------/----------------/
 
-	filter partition...
+	filterPolicy partition...
 						/---------------/----------------/---------------/----------------/--------------/
 
-	filter data...             filter 0                      filter 1               filter 2
+	filterPolicy data...             filterPolicy 0                      filterPolicy 1               filterPolicy 2
 					   /--------------------/----------------------------------/----------------/
-	filter offset 	   0                  2500							     7000              9000
+	filterPolicy offset 	   0                  2500							     7000              9000
 						  0      1     2      3 	 4(offset's offset)
 					  /------/------/------/------/------/
 	value				 0     2500   7000   7000   9000
@@ -322,7 +322,7 @@ func (tableWriter *TableWriter) Close() error {
 		return err
 	}
 
-	// flush filter
+	// flush filterPolicy
 	bh, err := tableWriter.finishFilterBlock()
 	if err != nil {
 		return err
@@ -330,7 +330,7 @@ func (tableWriter *TableWriter) Close() error {
 
 	// flush meta block
 	metaBlock := tableWriter.metaBlock
-	metaBlock.append([]byte("filter.bloomFilter"), writeBH(nil, *bh))
+	metaBlock.append([]byte("filterPolicy.bloomFilter"), writeBH(nil, *bh))
 	metaBH, err := tableWriter.writeBlock(&metaBlock.data, kCompressionTypeNone)
 	if err != nil {
 		return err

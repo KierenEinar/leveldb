@@ -39,7 +39,7 @@ type Options struct {
 	InternalComparer comparer.Comparer
 
 	// filter keys policy, set default InternalKey Filter
-	InternalFilter filter.IFilter
+	FilterPolicy filter.IFilter
 
 	// set the storage to support data persist, set default fileStorage
 	Storage storage.Storage
