@@ -3,6 +3,7 @@ package leveldb
 import (
 	"encoding/binary"
 	"io"
+	"leveldb/storage"
 )
 
 const (
@@ -160,7 +161,7 @@ func (edit *VersionEdit) EncodeTo(dest io.Writer) {
 	}
 }
 
-func (edit *VersionEdit) DecodeFrom(src) {
+func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
 
 	var typ int
 
@@ -241,7 +242,7 @@ func (edit *VersionEdit) DecodeFrom(src) {
 
 }
 
-func (edit *VersionEdit) readHeader(src SequentialReader) int {
+func (edit *VersionEdit) readHeader(src io.ByteReader) int {
 	return edit.readVarInt(src)
 }
 
@@ -267,19 +268,19 @@ func (edit *VersionEdit) putUVarInt(w io.Writer, value uint64) {
 	return
 }
 
-func (edit *VersionEdit) readVarInt(src SequentialReader) int {
+func (edit *VersionEdit) readVarInt(src io.ByteReader) int {
 	var value int64
 	value, edit.err = binary.ReadVarint(src)
 	return int(value)
 }
 
-func (edit *VersionEdit) readUVarInt(src SequentialReader) uint64 {
+func (edit *VersionEdit) readUVarInt(src io.ByteReader) uint64 {
 	var value uint64
 	value, edit.err = binary.ReadUvarint(src)
 	return value
 }
 
-func (edit *VersionEdit) readBytes(src SequentialReader) []byte {
+func (edit *VersionEdit) readBytes(src storage.SequentialReader) []byte {
 
 	size, err := binary.ReadVarint(src)
 	if err != nil {

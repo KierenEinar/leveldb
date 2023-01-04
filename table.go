@@ -3,17 +3,16 @@ package leveldb
 import (
 	"bytes"
 	"leveldb/options"
-	"leveldb/storage"
 	"leveldb/utils"
 	"sort"
 )
 
 type tFile struct {
-	fd         storage.Fd
+	fd         int
 	iMax       InternalKey
 	iMin       InternalKey
 	size       int
-	allowSeeks int32
+	allowSeeks int
 }
 
 type tFiles []tFile

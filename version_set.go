@@ -83,7 +83,20 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 	for _, addTable := range edit.addedTables {
 		level, number := addTable.level, addTable.number
 		builder.deleted[level].remove(number)
-		builder.inserted[level].add(addTable)
+
+		tFile := &tFile{
+			fd:   int(addTable.number),
+			iMax: addTable.imax,
+			iMin: addTable.imin,
+			size: addTable.size,
+		}
+
+		allowSeeks := addTable.size / 1 << 15
+		if allowSeeks < 100 {
+			allowSeeks = 100
+		}
+		tFile.allowSeeks = allowSeeks
+		builder.inserted[level].add(tFile)
 	}
 }
 
@@ -449,11 +462,11 @@ func finalize(v *Version) {
 	for level := 0; level < len(v.levels); level++ {
 		if level == 0 {
 			length := len(v.levels[level])
-			bestScore = float64(length) / kLevel0StopWriteTrigger
+			bestScore = float64(length) / options.KLevel0StopWriteTrigger
 			bestLevel = 0
 		} else {
 			totalSize := uint64(v.levels[level].size())
-			score := float64(totalSize / maxBytesForLevel(level))
+			score := float64(totalSize / options.MaxBytesForLevel(level))
 			if score > bestScore {
 				bestScore = score
 				bestLevel = level
@@ -475,11 +488,11 @@ func (vSet *VersionSet) levelFilesNum(level int) int {
 func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 
 	var (
-		hasComparerName, hasLogFileNum, hasNextFileNum bool
-		comparerName                                   []byte
-		logFileNum                                     uint64
-		seqNum                                         Sequence
-		nextFileNum                                    uint64
+		hasComparerName, hasLogFileNum, hasNextFileNum, hasLastSeq bool
+		comparerName                                               []byte
+		logFileNum                                                 uint64
+		seqNum                                                     Sequence
+		nextFileNum                                                uint64
 	)
 
 	reader, rErr := vSet.storage.NewSequentialReader(manifest)
@@ -489,10 +502,11 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	}
 
 	var (
-		edit     VersionEdit
-		vBuilder vBuilder
-		version  Version
+		edit    VersionEdit
+		version Version
 	)
+
+	vBuilder := newBuilder(vSet, nil)
 
 	journalReader := wal.NewJournalReader(reader)
 	vBuilder.vSet = vSet
@@ -513,10 +527,12 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 			return
 		}
 
+		vBuilder.apply(edit)
+
 		if edit.hasRec(kComparerName) {
 			hasComparerName = true
 			if bytes.Compare(edit.comparerName, vSet.cmp.Name()) != 0 {
-				err = NewErrCorruption("invalid comparator")
+				err = errors.NewErrCorruption("invalid comparator")
 				return
 			}
 			comparerName = edit.comparerName
@@ -531,22 +547,32 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 			hasLogFileNum = true
 			logFileNum = edit.journalNum
 		}
-		vBuilder.apply(edit)
+
+		if edit.hasRec(kSeqNum) {
+			hasLastSeq = true
+			seqNum = edit.lastSeq
+		}
+
 		edit.reset()
 	}
 
 	if !hasComparerName {
-		err = NewErrCorruption("missing comparer name")
+		err = errors.NewErrCorruption("missing comparer name")
 		return
 	}
 
 	if !hasLogFileNum {
-		err = NewErrCorruption("missing log num")
+		err = errors.NewErrCorruption("missing log num")
 		return
 	}
 
 	if !hasNextFileNum {
-		err = NewErrCorruption("missing next file num")
+		err = errors.NewErrCorruption("missing next file num")
+		return
+	}
+
+	if !hasLastSeq {
+		err = errors.NewErrCorruption("missing last seq num")
 		return
 	}
 
@@ -557,8 +583,8 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	finalize(&version)
 	vSet.appendVersion(&version)
 	vSet.current = &version
-	vSet.manifestFd = Fd{
-		FileType: KDescriptorFile,
+	vSet.manifestFd = storage.Fd{
+		FileType: storage.KDescriptorFile,
 		Num:      nextFileNum,
 	}
 	vSet.nextFileNum = nextFileNum + 1

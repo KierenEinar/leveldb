@@ -236,21 +236,17 @@ func (chunk *chunkReader) ReadByte() (byte, error) {
 	jr := chunk.jr
 
 	for {
-		if jr.scratch.Len() > 0 {
-			return jr.scratch.ReadByte()
+
+		b, err := jr.scratch.ReadByte()
+		if err != nil && err != io.EOF {
+			return b, err
 		}
-		if chunk.eof {
-			return byte(0), io.EOF
-		}
-		rt, fragment, err := jr.seekNextFragment(false)
-		if err == io.EOF {
-			return byte(0), io.EOF
-		}
-		if err != nil {
-			return byte(0), err
-		}
-		chunk.eof = rt == kRecordLast
+
+		_, fragment, err := jr.seekNextFragment(false)
 		jr.scratch.Write(fragment)
+		if err == io.EOF {
+			chunk.eof = true
+		}
 	}
 
 }
@@ -264,30 +260,28 @@ func (chunk *chunkReader) Read(p []byte) (nRead int, rErr error) {
 
 		nRead += n
 
-		if chunk.eof {
-			return
-		}
-
 		// p is fill full
 		if n == cap(p) {
 			return
 		}
 
-		// p is not fill full, only if there has next chunk should read next chunk
-		if jr.scratch.Len() == 0 && !chunk.eof {
-			_, fragment, err := jr.seekNextFragment(false)
-			jr.scratch.Write(fragment)
-			if err == io.EOF {
-				chunk.eof = true
-				continue
-			}
-			if err != nil {
-				jr.scratch.Reset()
-				rErr = err
-				return
-			}
-			continue
+		if chunk.eof {
+			rErr = io.EOF
+			return
 		}
+
+		// p is not fill full, only if there has next chunk should read next chunk
+		_, fragment, err := jr.seekNextFragment(false)
+		jr.scratch.Write(fragment)
+		if err == io.EOF {
+			chunk.eof = true
+		}
+		if err != nil {
+			jr.scratch.Reset()
+			rErr = err
+			return
+		}
+
 	}
 }
 

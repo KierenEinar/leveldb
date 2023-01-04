@@ -24,6 +24,7 @@ type SequentialWriter interface {
 type SequentialReader interface {
 	io.Reader
 	io.Closer
+	ByteReader
 }
 
 type ByteReader interface {
@@ -413,6 +414,22 @@ func (fs *FileStorage) NewSequentialReader(fd Fd) (r SequentialReader, err error
 
 	runtime.SetFinalizer(r, (*FileWrapper).Close)
 
+	return
+}
+
+func (fw *FileWrapper) ReadByte() (b byte, err error) {
+	p := make([]byte, 1)
+	n, err := fw.File.Read(p)
+	if err != nil {
+		return
+	}
+	if n == 0 {
+		err = io.EOF
+		return
+	}
+	if n > 0 {
+		b = p[0]
+	}
 	return
 }
 
