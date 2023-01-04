@@ -9,17 +9,18 @@ import (
 )
 
 type tFile struct {
-	fd   storage.Fd
-	iMax InternalKey
-	iMin InternalKey
-	Size int
+	fd         storage.Fd
+	iMax       InternalKey
+	iMin       InternalKey
+	size       int
+	allowSeeks int32
 }
 
 type tFiles []tFile
 
 func (sf tFiles) size() (size int) {
 	for _, v := range sf {
-		size += v.Size
+		size += v.size
 	}
 	return
 }

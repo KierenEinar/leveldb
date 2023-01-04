@@ -472,7 +472,7 @@ func (vSet *VersionSet) levelFilesNum(level int) int {
 	return len(c.levels[level])
 }
 
-func (vSet *VersionSet) recover(manifest Fd) (err error) {
+func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 
 	var (
 		hasComparerName, hasLogFileNum, hasNextFileNum bool
@@ -482,7 +482,7 @@ func (vSet *VersionSet) recover(manifest Fd) (err error) {
 		nextFileNum                                    uint64
 	)
 
-	reader, rErr := vSet.storage.Open(manifest)
+	reader, rErr := vSet.storage.NewSequentialReader(manifest)
 	if rErr != nil {
 		err = rErr
 		return
@@ -494,7 +494,7 @@ func (vSet *VersionSet) recover(manifest Fd) (err error) {
 		version  Version
 	)
 
-	journalReader := NewJournalReader(reader)
+	journalReader := wal.NewJournalReader(reader)
 	vBuilder.vSet = vSet
 	for {
 

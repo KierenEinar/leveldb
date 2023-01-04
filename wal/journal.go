@@ -259,36 +259,34 @@ func (chunk *chunkReader) Read(p []byte) (nRead int, rErr error) {
 
 	jr := chunk.jr
 	for {
-		if jr.scratch.Len() == 0 && chunk.eof {
-			return nRead, io.EOF
-		}
 
 		n, _ := jr.scratch.Read(p)
 
 		nRead += n
 
+		if chunk.eof {
+			return
+		}
+
 		// p is fill full
 		if n == cap(p) {
-			return nRead, nil
+			return
 		}
 
 		// p is not fill full, only if there has next chunk should read next chunk
 		if jr.scratch.Len() == 0 && !chunk.eof {
-			recordType, fragment, err := jr.seekNextFragment(false)
+			_, fragment, err := jr.seekNextFragment(false)
+			jr.scratch.Write(fragment)
 			if err == io.EOF {
 				chunk.eof = true
-				return nRead, nil
+				continue
 			}
 			if err != nil {
 				jr.scratch.Reset()
-				return nRead, err
+				rErr = err
+				return
 			}
-			if recordType == kRecordLast {
-				chunk.eof = true
-			}
-			jr.scratch.Write(fragment)
 			continue
-
 		}
 	}
 }
@@ -341,7 +339,8 @@ func (s *sequentialFile) readPhysicalRecord() (kRecordType byte, fragment []byte
 		if s.physicalReadOffset+journalBlockHeaderLen > s.physicalN {
 			if !s.eof {
 				n, err := s.Read(s.buf[:])
-				s.physicalN += n
+				s.physicalN = n
+				s.physicalReadOffset = 0
 				if err != nil {
 					s.eof = true
 					kRecordType = kEof
@@ -374,12 +373,14 @@ func (s *sequentialFile) readPhysicalRecord() (kRecordType byte, fragment []byte
 			return
 		}
 
-		s.physicalReadOffset += dataLen
-
 		// last empty block
 		if dataLen == 0 {
+			s.physicalReadOffset += dataLen
 			continue
 		}
+
+		fragment = s.buf[s.physicalReadOffset : s.physicalReadOffset+dataLen]
+		s.physicalReadOffset += dataLen
 
 		return
 

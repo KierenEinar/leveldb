@@ -18,7 +18,7 @@ import (
 
 type DBImpl struct {
 	rwMutex    sync.RWMutex
-	VersionSet *VersionSet
+	versionSet *VersionSet
 
 	journalWriter *wal.JournalWriter
 
@@ -57,7 +57,7 @@ type DBImpl struct {
 func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
 
 	dbImpl.rwMutex.RLock()
-	v := dbImpl.VersionSet.getCurrent()
+	v := dbImpl.versionSet.getCurrent()
 	mem := dbImpl.mem
 	imm := dbImpl.imm
 	v.Ref()
@@ -267,7 +267,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 	for {
 		if dbImpl.bgErr != nil {
 			return dbImpl.bgErr
-		} else if allowDelay && dbImpl.VersionSet.levelFilesNum(0) >= options.KLevel0SlowDownTrigger {
+		} else if allowDelay && dbImpl.versionSet.levelFilesNum(0) >= options.KLevel0SlowDownTrigger {
 			allowDelay = false
 			dbImpl.rwMutex.Unlock()
 			time.Sleep(time.Microsecond * 1000)
@@ -276,14 +276,14 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 			break
 		} else if dbImpl.imm != nil { // wait background compaction compact imm table
 			dbImpl.backgroundWorkFinishedSignal.Wait()
-		} else if dbImpl.VersionSet.levelFilesNum(0) >= options.KLevel0StopWriteTrigger {
+		} else if dbImpl.versionSet.levelFilesNum(0) >= options.KLevel0StopWriteTrigger {
 			dbImpl.backgroundWorkFinishedSignal.Wait()
 		} else {
 			journalFd := storage.Fd{
 				FileType: storage.KJournalFile,
-				Num:      dbImpl.VersionSet.allocFileNum(),
+				Num:      dbImpl.versionSet.allocFileNum(),
 			}
-			s := dbImpl.VersionSet.storage
+			s := dbImpl.versionSet.storage
 			writer, err := s.NewAppendableFile(journalFd)
 			if err == nil {
 				_ = dbImpl.journalWriter.Close()
@@ -299,7 +299,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 				mem.Ref()
 				dbImpl.mem = mem
 			} else {
-				dbImpl.VersionSet.reuseFileNum(journalFd.Num)
+				dbImpl.versionSet.reuseFileNum(journalFd.Num)
 				return err
 			}
 			dbImpl.MaybeScheduleCompaction()
@@ -361,7 +361,7 @@ func (dbImpl *DBImpl) MaybeScheduleCompaction() {
 		// do nothing
 	} else if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
 		// do nothing
-	} else if atomic.LoadUint32(&dbImpl.hasImm) == 0 && !dbImpl.VersionSet.needCompaction() {
+	} else if atomic.LoadUint32(&dbImpl.hasImm) == 0 && !dbImpl.versionSet.needCompaction() {
 		// do nothing
 	} else {
 		go dbImpl.backgroundCall()
@@ -398,7 +398,7 @@ func (dbImpl *DBImpl) backgroundCompaction() {
 		return
 	}
 
-	c := dbImpl.VersionSet.pickCompaction1()
+	c := dbImpl.versionSet.pickCompaction1()
 	if c == nil {
 		return
 	} else if len(c.inputs[0]) == 1 && len(c.inputs[1]) == 0 && c.gp.size() <= c.gpOverlappedLimit {
@@ -478,27 +478,15 @@ func (db *DB) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err error) {
 	return
 }
 
-func Open(dbpath string, option options.Options) (*DB, error) {
+func Open(dbpath string, option options.Options) (db *DB, err error) {
 	opt := sanitizeOptions(option)
+	dbImpl := newDBImpl(opt)
+	dbImpl.rwMutex.Lock()
+	defer dbImpl.rwMutex.Unlock()
 
-	db := &DBImpl{
-		VersionSet: &VersionSet{
-			cmp:      opt.InternalComparer,
-			storage:  opt.Storage,
-			versions: list.New(),
-		},
-		tableCache: newTableCache(opt),
-	}
-
-	tableOperation := newTableOperation(opt, db.VersionSet)
-	db.VersionSet.tableOperation = tableOperation
-
-	db.rwMutex.Lock()
-	defer db.rwMutex.Unlock()
-
-	err = db.recover()
+	err = dbImpl.recover()
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	memDB := NewMemTable(0, db.VersionSet.cmp)
@@ -532,7 +520,7 @@ func Open(dbpath string, option options.Options) (*DB, error) {
 }
 
 func (dbImpl *DBImpl) recover() error {
-	manifestFd, err := dbImpl.VersionSet.storage.GetCurrent()
+	manifestFd, err := dbImpl.opt.Storage.GetCurrent()
 	if err != nil {
 		if err != os.ErrNotExist {
 			return err
@@ -543,13 +531,12 @@ func (dbImpl *DBImpl) recover() error {
 		}
 
 		err = dbImpl.newDb()
-	} else {
-		err = dbImpl.VersionSet.recover(manifestFd)
 	}
-
 	if err != nil {
 		return err
 	}
+
+	err = dbImpl.versionSet.recover(manifestFd)
 
 	fds, err := db.VersionSet.storage.List()
 	if err != nil {
@@ -597,49 +584,45 @@ func (dbImpl *DBImpl) recover() error {
 func (dbImpl *DBImpl) newDb() (err error) {
 	dbImpl.seqNum = 0
 
+	newDb := &VersionEdit{
+		comparerName: dbImpl.opt.InternalComparer.Name(),
+		nextFileNum:  2,
+		lastSeq:      0,
+	}
+
 	manifestFd := storage.Fd{
 		FileType: storage.KDescriptorFile,
 		Num:      1,
 	}
 
-	writer, wErr := dbImpl.VersionSet.storage.NewAppendableFile(manifestFd)
+	writer, wErr := dbImpl.opt.Storage.NewAppendableFile(manifestFd)
 	if wErr != nil {
 		err = wErr
 		return
 	}
 
 	defer func() {
-		if err == nil {
-			return
-		}
 		_ = writer.Close()
-		_ = dbImpl.VersionSet.storage.Remove(manifestFd)
 	}()
 
-	dbImpl.VersionSet.manifestFd = manifestFd
-	dbImpl.VersionSet.manifestWriter = wal.NewJournalWriter(writer)
-
-	newDb := &VersionEdit{
-		journalNum:   dbImpl.journalFd.Num,
-		nextFileNum:  3,
-		lastSeq:      0,
-		comparerName: dbImpl.opt.InternalComparer.Name(),
-	}
-
-	newDb.EncodeTo(dbImpl.VersionSet.manifestWriter)
+	newDb.EncodeTo(writer)
 	if newDb.err != nil {
 		err = newDb.err
 		return
 	}
 
-	err = dbImpl.VersionSet.manifestWriter.Sync()
+	err = writer.Sync()
 	if err != nil {
 		return
 	}
 
-	err = dbImpl.VersionSet.storage.SetCurrent(manifestFd.Num)
-	return
+	err = dbImpl.opt.Storage.SetCurrent(manifestFd.Num)
 
+	if err != nil {
+		_ = dbImpl.opt.Storage.Remove(manifestFd)
+	}
+
+	return
 }
 
 func (db *DB) recoverLogFile(fd Fd, edit *VersionEdit) error {
@@ -763,4 +746,27 @@ func (db *DB) removeObsoleteFiles() (err error) {
 
 func sanitizeOptions(options options.Options) *options.Options {
 	return nil
+}
+
+func newDBImpl(opt *options.Options) *DBImpl {
+
+	db := &DBImpl{
+		versionSet: &VersionSet{
+			versions:     list.New(),
+			compactPtrs:  [7]compactPtr{},
+			cmp:          opt.InternalComparer,
+			comparerName: opt.InternalComparer.Name(),
+			tableCache:   newTableCache(opt),
+			storage:      opt.Storage,
+		},
+		writers:    list.New(),
+		hasImm:     0,
+		tableCache: newTableCache(opt),
+		snapshots:  list.New(),
+		opt:        opt,
+	}
+
+	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
+	db.tableOperation = newTableOperation(opt, db.versionSet)
+	return db
 }

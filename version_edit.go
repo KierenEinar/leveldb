@@ -160,7 +160,7 @@ func (edit *VersionEdit) EncodeTo(dest io.Writer) {
 	}
 }
 
-func (edit *VersionEdit) DecodeFrom(src SequentialReader) {
+func (edit *VersionEdit) DecodeFrom(src) {
 
 	var typ int
 
