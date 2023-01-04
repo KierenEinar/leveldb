@@ -3,19 +3,20 @@ package leveldb
 import (
 	"bytes"
 	"leveldb/collections"
+	"leveldb/comparer"
 	"leveldb/ikey"
 	"time"
 )
 
 type MemDB struct {
-	iCmp *iComparer
+	cmp comparer.BasicComparer
 	*collections.SkipList
 }
 
-func NewMemTable(capacity int, iCmp *iComparer) *MemDB {
+func NewMemTable(capacity int, cmp comparer.BasicComparer) *MemDB {
 	memDB := &MemDB{
-		SkipList: collections.NewSkipList(time.Now().UnixNano(), capacity, iCmp),
-		iCmp:     iCmp,
+		SkipList: collections.NewSkipList(time.Now().UnixNano(), capacity, cmp),
+		cmp:      cmp,
 	}
 	return memDB
 }

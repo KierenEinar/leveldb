@@ -80,10 +80,11 @@ type IndexedIterator struct {
 func NewIndexedIterator(indexed iteratorIndexer) Iterator {
 	ii := &IndexedIterator{
 		indexed: indexed,
-		BasicReleaser: &utils.BasicReleaser{
-			OnClose: func() {
-				indexed.UnRef()
-			},
+	}
+	ii.BasicReleaser = &utils.BasicReleaser{
+		OnClose: func() {
+			indexed.UnRef()
+			ii.clearData()
 		},
 	}
 	return ii

@@ -103,14 +103,13 @@ func (block *dataBlock) seekRestartPoint(key []byte) int {
 type blockIter struct {
 	*dataBlock
 	*utils.BasicReleaser
-	cmp            comparer.Comparer
-	offset         int
-	prevKey        []byte
-	dir            iterator.Direction
-	err            error
-	ikey           []byte
-	value          []byte
-	dummyCleanNode cleanUpNode
+	cmp     comparer.Comparer
+	offset  int
+	prevKey []byte
+	dir     iterator.Direction
+	err     error
+	ikey    []byte
+	value   []byte
 }
 
 func newBlockIter(dataBlock *dataBlock, cmp comparer.Comparer) *blockIter {
@@ -123,11 +122,6 @@ func newBlockIter(dataBlock *dataBlock, cmp comparer.Comparer) *blockIter {
 			bi.prevKey = nil
 			bi.ikey = nil
 			bi.value = nil
-			node := bi.dummyCleanNode.next
-			for node != nil {
-				node.doClean()
-				node = node.next
-			}
 		},
 	}
 	bi.BasicReleaser = br
@@ -255,9 +249,36 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 	return
 }
 
-func (tr *Reader) readMeta() (err error) {
+func (reader *Reader) NewIterator() iterator.Iterator {
+	return iterator.NewIndexedIterator(reader.newIndexIter())
+}
 
-	if tr.opt.FilterPolicy == nil {
+func (reader *Reader) Find(key []byte) (rKey []byte, value []byte, err error) {
+	return reader.find(key, false, true)
+}
+
+func (reader *Reader) FindKey(key []byte) (rKey []byte, err error) {
+	rKey, _, err = reader.find(key, true, true)
+	return
+}
+
+func (reader *Reader) Get(key []byte) (value []byte, err error) {
+
+	rKey, value, err := reader.find(key, false, true)
+	if err != nil {
+		return
+	}
+
+	if reader.cmp.Compare(rKey, key) != 0 {
+		err = errors.ErrNotFound
+	}
+
+	return value, nil
+}
+
+func (reader *Reader) readMeta() (err error) {
+
+	if reader.opt.FilterPolicy == nil {
 		return
 	}
 
@@ -269,22 +290,23 @@ func (tr *Reader) readMeta() (err error) {
 		}
 	}()
 
-	metaContent, err = tr.readBlock(tr.metaIndexBH)
+	metaContent, err = reader.readBlock(reader.metaIndexBH)
 	if err == nil {
-		block, err := newDataBlock(metaContent, comparer.DefaultComparer)
-		key := "filterPolicy." + tr.opt.FilterPolicy.Name()
+		block, err := newDataBlock(metaContent, reader.cmp)
+		key := "filter." + reader.opt.FilterPolicy.Name()
 		if err == nil {
 
-			iter := newBlockIter(block, comparer.DefaultComparer)
+			iter := newBlockIter(block, reader.cmp)
 			if iter.Seek([]byte(key)) && iter.Valid() != nil {
-				tr.readFilter(iter.Value())
+				reader.readFilter(iter.Value())
 			}
+			iter.UnRef()
 		}
 	}
 	return err
 }
 
-func (tr *Reader) readFooter(footerContent blockContent) error {
+func (reader *Reader) readFooter(footerContent blockContent) error {
 
 	footerData := footerContent.data
 	magic := footerData[40:]
@@ -293,17 +315,17 @@ func (tr *Reader) readFooter(footerContent blockContent) error {
 	}
 
 	bhLen, indexBH := readBH(footerData)
-	tr.indexBH = indexBH
+	reader.indexBH = indexBH
 
-	_, tr.metaIndexBH = readBH(footerData[bhLen:])
+	_, reader.metaIndexBH = readBH(footerData[bhLen:])
 	return nil
 }
 
-func (tr *Reader) readBlock(bh blockHandle) (content blockContent, err error) {
+func (reader *Reader) readBlock(bh blockHandle) (content blockContent, err error) {
 
 	scratch := utils.PoolGetBytes(int(bh.length) + kBlockTailLen)
 	var result *[]byte
-	_, err = tr.r.Pread(int64(bh.offset), &result, scratch)
+	_, err = reader.r.Pread(int64(bh.offset), &result, scratch)
 	if err != nil {
 		utils.PoolPutBytes(scratch)
 		return
@@ -314,7 +336,7 @@ func (tr *Reader) readBlock(bh blockHandle) (content blockContent, err error) {
 	compressType := data[blockContentLen]
 	checkSum := binary.LittleEndian.Uint32(data[blockContentLen+1:])
 
-	if tr.opt.VerifyCheckSum {
+	if reader.opt.VerifyCheckSum {
 		if crc32.ChecksumIEEE(data[:blockContentLen]) != checkSum {
 			utils.PoolPutBytes(scratch)
 			err = errors.NewErrCorruption("invalid checksum")
@@ -348,35 +370,34 @@ func (tr *Reader) readBlock(bh blockHandle) (content blockContent, err error) {
 	return
 }
 
-func (tr *Reader) blockReader(blockHandleValue []byte) (iter iterator.Iterator, err error) {
-	_, bh := readBH(blockHandleValue)
+func (reader *Reader) blockReader(bh blockHandle) (iter iterator.Iterator, err error) {
 	var (
 		content blockContent
 		handle  *cache.LRUHandle
 	)
-	if tr.opt.BlockCache != nil {
+	if reader.opt.BlockCache != nil {
 		cacheKey := *utils.PoolGetBytes(16)
-		binary.LittleEndian.PutUint64(cacheKey[:8], tr.cacheId)
+		binary.LittleEndian.PutUint64(cacheKey[:8], reader.cacheId)
 		binary.LittleEndian.PutUint64(cacheKey[8:], bh.offset)
 
-		handle = tr.opt.BlockCache.Lookup(cacheKey)
+		handle = reader.opt.BlockCache.Lookup(cacheKey)
 		if handle == nil {
-			if content, err = tr.readBlock(bh); err != nil {
+			if content, err = reader.readBlock(bh); err != nil {
 				return
 			}
 			if content.cacheable {
-				handle = tr.opt.BlockCache.Insert(cacheKey, uint32(len(content.data)), &content, func(key []byte, value interface{}) {
+				handle = reader.opt.BlockCache.Insert(cacheKey, uint32(len(content.data)), &content, func(key []byte, value interface{}) {
 					releaseContent(value)
 				})
 			}
 		}
 	} else {
-		if content, err = tr.readBlock(bh); err != nil {
+		if content, err = reader.readBlock(bh); err != nil {
 			return
 		}
 	}
 
-	dataBlock, err := newDataBlock(content, tr.opt.InternalComparer)
+	dataBlock, err := newDataBlock(content, reader.opt.InternalComparer)
 	if err != nil {
 		if content.poolable {
 			utils.PoolPutBytes(&content.data)
@@ -384,80 +405,20 @@ func (tr *Reader) blockReader(blockHandleValue []byte) (iter iterator.Iterator, 
 		return
 	}
 
-	blockIter := newBlockIter(dataBlock, tr.cmp)
+	blockIter := newBlockIter(dataBlock, reader.cmp)
 	if handle != nil {
-		registerCleanUp(&blockIter.dummyCleanNode, releaseHandle, tr.opt.BlockCache, handle)
+		blockIter.RegisterCleanUp(releaseHandle, reader.opt.BlockCache, handle)
 	} else {
-		registerCleanUp(&blockIter.dummyCleanNode, releaseContent, &content)
+		blockIter.RegisterCleanUp(releaseContent, &content)
 	}
 
-	return
-}
-
-// todo used cache
-func (tr *Reader) readRawBlock(bh blockHandle) (*dataBlock, error) {
-	r := tr.r
-
-	data := make([]byte, bh.length+kBlockTailLen)
-
-	n, err := r.ReadAt(data, int64(bh.offset))
-	if err != nil {
-		return nil, err
-	}
-
-	if n < 5 {
-		return nil, errors.NewErrCorruption("too short")
-	}
-
-	rawData := data[:n-5]
-	checkSum := binary.LittleEndian.Uint32(data[n-5 : n-1])
-	compressionType := compressionType(data[n-1])
-
-	if crc32.ChecksumIEEE(rawData) != checkSum {
-		return nil, errors.NewErrCorruption("checksum failed")
-	}
-
-	switch compressionType {
-	case kCompressionTypeNone:
-	default:
-		return nil, errors.ErrUnSupportCompressionType
-	}
-
-	block, err := newDataBlock(data[:n], tr.cmp)
-	if err != nil {
-		return nil, err
-	}
-	return block, nil
-}
-
-func (tr *Reader) getIndexBlock() (b *dataBlock, err error) {
-
-	defer func() {
-		if b != nil {
-			b.Ref() // for caller
-		}
-	}()
-
-	if tr.indexBlock != nil {
-		return tr.indexBlock, nil
-	}
-	b, err = tr.readRawBlock(tr.indexBH)
-	if err != nil {
-		return nil, err
-	}
-	tr.indexBlock = b
 	return
 }
 
 // Seek return gte key
-func (tr *Reader) find(key []byte, noValue bool, filtered bool) (ikey []byte, value []byte, err error) {
-	indexBlock, err := tr.getIndexBlock()
-	if err != nil {
-		return
-	}
-	defer indexBlock.UnRef()
-
-	indexBlockIter := newBlockIter(indexBlock)
+func (reader *Reader) find(key []byte, noValue bool, filtered bool) (ikey []byte, value []byte, err error) {
+	indexBlock := reader.indexBlock
+	indexBlockIter := newBlockIter(indexBlock, reader.cmp)
 	defer indexBlockIter.UnRef()
 
 	if !indexBlockIter.Seek(key) {
@@ -468,34 +429,31 @@ func (tr *Reader) find(key []byte, noValue bool, filtered bool) (ikey []byte, va
 	_, blockHandle := readBH(indexBlockIter.Value())
 
 	if filtered {
-		contains := tr.filterBlock.mayContains(tr.filterPolicy, blockHandle, key)
+		contains := reader.filterBlockReader.mayContains(key, blockHandle.offset)
 		if !contains {
 			err = errors.ErrNotFound
 			return
 		}
 	}
 
-	dataBlock, err := tr.readRawBlock(blockHandle)
+	dataBlockIter, err := reader.blockReader(blockHandle)
 	if err != nil {
 		return
 	}
-	defer dataBlock.UnRef()
-
-	dataBlockIter := newBlockIter(dataBlock)
 	defer dataBlockIter.UnRef()
 
 	if dataBlockIter.Seek(key) {
 		ikey = dataBlockIter.Key()
 		if !noValue {
-			value = append([]byte(nil), dataBlockIter.value...)
+			value = append([]byte(nil), dataBlockIter.Value()...)
 		}
 		return
 	}
 
 	/**
 	special case
-	0..block last  abcd
-	1..block first abcz
+	0..block last  abcd123
+	1..block first abcz124
 	so the index block key is abce
 	if search abce, so block..0 won't exist abce, should go to the next block
 	*/
@@ -507,67 +465,33 @@ func (tr *Reader) find(key []byte, noValue bool, filtered bool) (ikey []byte, va
 
 	_, blockHandle1 := readBH(indexBlockIter.Value())
 
-	dataBlock1, err := tr.readRawBlock(blockHandle1)
+	dataBlock1Iter, err := reader.blockReader(blockHandle1)
 	if err != nil {
 		return
 	}
-	dataBlock1.UnRef()
+	dataBlock1Iter.UnRef()
 
-	dataBlockIter1 := newBlockIter(dataBlock1)
-	defer dataBlockIter1.UnRef()
-
-	if !dataBlockIter1.Seek(key) {
+	if !dataBlock1Iter.Seek(key) {
 		err = errors.ErrNotFound
 		return
 	}
 
-	ikey = dataBlockIter1.Key()
+	ikey = dataBlock1Iter.Key()
 	if !noValue {
-		value = append([]byte(nil), dataBlockIter.value...)
+		value = append([]byte(nil), dataBlockIter.Value()...)
 	}
 	return
 }
 
-func (tr *Reader) Find(key []byte) (rKey []byte, value []byte, err error) {
-	return tr.find(key, false, true)
-}
-
-func (tr *Reader) FindKey(key []byte) (rKey []byte, err error) {
-	rKey, _, err = tr.find(key, true, true)
-	return
-}
-
-func (tr *Reader) Get(key []byte) (value []byte, err error) {
-
-	rKey, value, err := tr.find(key, false, true)
-	if err != nil {
-		return
-	}
-
-	if tr.cmp.Compare(rKey, key) != 0 {
-		err = errors.ErrNotFound
-	}
-
-	return value, nil
-}
-
-func (tr *Reader) NewIterator() (iterator.Iterator, error) {
-	indexer, err := newIndexIter(tr)
-	if err != nil {
-		return nil, err
-	}
-	return iterator.NewIndexedIterator(indexer), nil
-}
-
-func (tr *Reader) Close() {
-	if tr.indexBlock != nil {
-		if tr.indexBlock.blockContent.poolable {
-			utils.PoolPutBytes(&tr.indexBlock.blockContent.data)
+func (reader *Reader) Close() {
+	if reader.indexBlock != nil {
+		if reader.indexBlock.blockContent.poolable {
+			utils.PoolPutBytes(&reader.indexBlock.blockContent.data)
 		}
 	}
-	if tr.filterBlockReader != nil {
-		if tr.filterBlockReader.filterData.poolable {
-			utils.PoolPutBytes(&tr.filterBlockReader.filterData.data)
+	if reader.filterBlockReader != nil {
+		if reader.filterBlockReader.filterData.poolable {
+			utils.PoolPutBytes(&reader.filterBlockReader.filterData.data)
 		}
 	}
 }
@@ -578,25 +502,23 @@ type indexIter struct {
 	*utils.BasicReleaser
 }
 
-func newIndexIter(tr *Reader) (*indexIter, error) {
-	indexBlock, err := tr.getIndexBlock()
-	if err != nil {
-		return nil, err
-	}
-	tr.Ref()
-	blockIter := newBlockIter(indexBlock)
-
+func (reader *Reader) newIndexIter() *indexIter {
+	blockIter := newBlockIter(reader.indexBlock, reader.cmp)
 	ii := &indexIter{
 		blockIter: blockIter,
-		tr:        tr,
+		tr:        reader,
 		BasicReleaser: &utils.BasicReleaser{
 			OnClose: func() {
 				blockIter.UnRef()
-				tr.UnRef()
+				reader.UnRef()
+			},
+			OnRef: func() {
+				reader.Ref()
 			},
 		},
 	}
-	return ii, nil
+	ii.Ref()
+	return ii
 }
 
 func (indexIter *indexIter) Get() iterator.Iterator {
@@ -606,16 +528,11 @@ func (indexIter *indexIter) Get() iterator.Iterator {
 	}
 
 	_, bh := readBH(value)
-
-	dataBlock, err := indexIter.tr.readRawBlock(bh)
+	iter, err := indexIter.tr.blockReader(bh)
 	if err != nil {
 		indexIter.err = err
-		return nil
 	}
-	defer dataBlock.UnRef()
-
-	return newBlockIter(dataBlock)
-
+	return iter
 }
 
 type filterBlockReader struct {
@@ -626,9 +543,9 @@ type filterBlockReader struct {
 	filterData    blockContent
 }
 
-func (r *Reader) newFilterBlockReader(bh blockHandle, filterPolicy filter.IFilter) (
+func (reader *Reader) newFilterBlockReader(bh blockHandle, filterPolicy filter.IFilter) (
 	fReader *filterBlockReader, err error) {
-	blockContent, err := r.readBlock(bh)
+	blockContent, err := reader.readBlock(bh)
 	if err != nil {
 		return
 	}
@@ -657,26 +574,26 @@ func (r *Reader) newFilterBlockReader(bh blockHandle, filterPolicy filter.IFilte
 	return
 }
 
-func (fReader *filterBlockReader) mayContains(key, filter []byte, blockOffset uint32) bool {
-	index := blockOffset / (1 << fReader.baseLg)
+func (fReader *filterBlockReader) mayContains(key []byte, blockOffset uint64) bool {
+	index := uint32(blockOffset / (1 << fReader.baseLg))
 	start := fReader.offsetsOffset + index*4
 	end := fReader.offsetsOffset + (index+1)*4
 
 	i := binary.LittleEndian.Uint32(fReader.filterData.data[start : start+4])
 	j := binary.LittleEndian.Uint32(fReader.filterData.data[end : end+4])
-	return fReader.filterPolicy.MayContains(key, filter[i:j])
+	return fReader.filterPolicy.MayContains(key, fReader.filterData.data[i:j])
 }
 
-func (r *Reader) readFilter(bhValue []byte) {
+func (reader *Reader) readFilter(bhValue []byte) {
 	_, metaBh := readBH(bhValue)
 
-	filterBlockReader, err := r.newFilterBlockReader(metaBh, r.opt.FilterPolicy)
+	filterBlockReader, err := reader.newFilterBlockReader(metaBh, reader.opt.FilterPolicy)
 	if err != nil {
 		// todo logger
 		// if failed, just return
 		return
 	}
-	r.filterBlockReader = filterBlockReader
+	reader.filterBlockReader = filterBlockReader
 	return
 }
 
@@ -699,31 +616,5 @@ func releaseContent(args ...interface{}) {
 	utils.Assert(ok, "releaseContent arg1 convert to *blockContent failed")
 	if content.poolable {
 		utils.PoolPutBytes(&content.data)
-	}
-}
-
-type cleanUpNode struct {
-	next *cleanUpNode
-	f    func(args ...interface{})
-	args []interface{}
-}
-
-func registerCleanUp(node *cleanUpNode, f func(args ...interface{}), args ...interface{}) {
-	nextNode := &cleanUpNode{
-		f:    f,
-		args: args,
-	}
-	if node.next != nil {
-		nextNode.next = node.next
-	}
-	node.next = nextNode
-	return
-}
-
-func (node *cleanUpNode) doClean() {
-	n := node
-	for n != nil {
-		n.f(n.args...)
-		n = node.next
 	}
 }

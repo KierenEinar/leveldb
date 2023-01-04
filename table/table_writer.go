@@ -250,7 +250,7 @@ func readBH(buf []byte) (bhLen int, bh blockHandle) {
 	return
 }
 
-type TableWriter struct {
+type Writer struct {
 	writer      storage.SequentialWriter
 	dataBlock   *blockWriter
 	indexBlock  *blockWriter
@@ -268,14 +268,7 @@ type TableWriter struct {
 	cmp     comparer.Comparer
 }
 
-func NewTableWriter(w storage.SequentialWriter) *TableWriter {
-	return &TableWriter{
-		writer:  w,
-		iFilter: filter.DefaultFilter,
-	}
-}
-
-func (tableWriter *TableWriter) Append(ikey, value []byte) error {
+func (tableWriter *Writer) Append(ikey, value []byte) error {
 
 	dataBlock := tableWriter.dataBlock
 	filterBlock := tableWriter.filterBlock
@@ -304,7 +297,7 @@ func (tableWriter *TableWriter) Append(ikey, value []byte) error {
 }
 
 // Close current sstable
-func (tableWriter *TableWriter) Close() error {
+func (tableWriter *Writer) Close() error {
 
 	dataBlock := tableWriter.dataBlock
 
@@ -351,7 +344,7 @@ func (tableWriter *TableWriter) Close() error {
 	return nil
 }
 
-func (tableWriter *TableWriter) finishDataBlock() error {
+func (tableWriter *Writer) finishDataBlock() error {
 
 	bh, err := tableWriter.writeBlock(&tableWriter.dataBlock.data, kCompressionTypeNone)
 	if err != nil {
@@ -364,7 +357,7 @@ func (tableWriter *TableWriter) finishDataBlock() error {
 	return nil
 }
 
-func (tableWriter *TableWriter) finishFilterBlock() (*blockHandle, error) {
+func (tableWriter *Writer) finishFilterBlock() (*blockHandle, error) {
 
 	filterWriter := tableWriter.filterBlock
 	filterWriter.generate()
@@ -381,7 +374,7 @@ func (tableWriter *TableWriter) finishFilterBlock() (*blockHandle, error) {
 	return bh, nil
 }
 
-func (tableWriter *TableWriter) writeBlock(buf *bytes.Buffer, compressionType compressionType) (*blockHandle, error) {
+func (tableWriter *Writer) writeBlock(buf *bytes.Buffer, compressionType compressionType) (*blockHandle, error) {
 
 	w := tableWriter.writer
 	offset := tableWriter.offset
@@ -409,7 +402,7 @@ func (tableWriter *TableWriter) writeBlock(buf *bytes.Buffer, compressionType co
 	return bh, nil
 }
 
-func (tableWriter *TableWriter) flushPendingBH(ikey []byte) error {
+func (tableWriter *Writer) flushPendingBH(ikey []byte) error {
 
 	if tableWriter.blockHandle == nil {
 		return nil
@@ -427,7 +420,7 @@ func (tableWriter *TableWriter) flushPendingBH(ikey []byte) error {
 	return nil
 }
 
-func (tableWriter *TableWriter) flushFooter(indexBH, metaBH blockHandle) error {
+func (tableWriter *Writer) flushFooter(indexBH, metaBH blockHandle) error {
 	footer := make([]byte, kTableFooterLen)
 	n1 := copy(footer, writeBH(nil, indexBH))
 	_ = copy(footer[n1:], writeBH(nil, metaBH))
@@ -447,6 +440,6 @@ func (tableWriter *TableWriter) flushFooter(indexBH, metaBH blockHandle) error {
 	return nil
 }
 
-func (tableWriter *TableWriter) fileSize() int {
+func (tableWriter *Writer) fileSize() int {
 	return tableWriter.offset
 }

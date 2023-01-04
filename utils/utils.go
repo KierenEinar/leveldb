@@ -18,14 +18,16 @@ func Assert(condition bool, msg ...string) {
 type Releaser interface {
 	Ref() int32
 	UnRef() int32
+	RegisterCleanUp(f func(args ...interface{}), args ...interface{})
 }
 
 type BasicReleaser struct {
-	release uint32
-	ref     int32
-	OnClose func()
-	OnRef   func()
-	OnUnRef func()
+	release          uint32
+	ref              int32
+	dummyCleanUpNode cleanUpNode
+	OnClose          func()
+	OnRef            func()
+	OnUnRef          func()
 }
 
 func (br *BasicReleaser) Ref() int32 {
@@ -47,6 +49,8 @@ func (br *BasicReleaser) UnRef() int32 {
 		if br.OnClose != nil {
 			atomic.StoreUint32(&br.release, 1)
 			br.OnClose()
+			node := br.dummyCleanUpNode.next
+			node.doClean()
 		}
 	}
 	return newInt32
@@ -61,4 +65,30 @@ func EnsureBuffer(dst []byte, size int) []byte {
 		return make([]byte, size)
 	}
 	return dst[:size]
+}
+
+type cleanUpNode struct {
+	next *cleanUpNode
+	f    func(args ...interface{})
+	args []interface{}
+}
+
+func (br *BasicReleaser) RegisterCleanUp(f func(args ...interface{}), args ...interface{}) {
+	nextNode := &cleanUpNode{
+		f:    f,
+		args: args,
+	}
+	if br.dummyCleanUpNode.next != nil {
+		nextNode.next = br.dummyCleanUpNode.next
+	}
+	br.dummyCleanUpNode.next = nextNode
+	return
+}
+
+func (node *cleanUpNode) doClean() {
+	n := node
+	for n != nil {
+		n.f(n.args...)
+		n = node.next
+	}
 }

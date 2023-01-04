@@ -35,6 +35,9 @@ func MaxBytesForLevel(level int) uint64 {
 // Options open db options
 type Options struct {
 
+	// if missing current file point to manifest, set true will create a new one
+	CreateIfMissingCurrent bool
+
 	// key order comparer, set default InternalKey Comparer
 	InternalComparer comparer.Comparer
 

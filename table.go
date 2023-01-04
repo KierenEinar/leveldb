@@ -110,14 +110,14 @@ func (vSet *VersionSet) createNewTable(fd Fd, fileSize int) (*TableWriter, error
 }
 
 type tableOperation struct {
-	session *VersionSet
-	storage Storage
+	versionSet *VersionSet
+	opt        *options.Options
 }
 
-func newTableOperation(s Storage, meta *VersionSet) *tableOperation {
+func newTableOperation(opt *options.Options, vs *VersionSet) *tableOperation {
 	return &tableOperation{
-		session: meta,
-		storage: s,
+		versionSet: vs,
+		opt:        opt,
 	}
 }
 
@@ -138,10 +138,10 @@ func (tableOperation *tableOperation) newIterator(f TFile) (Iterator, error) {
 }
 
 func (tableOperation *tableOperation) create() (*tWriter, error) {
-	fd := Fd{Num: tableOperation.session.allocFileNum(), FileType: KTableFile}
+	fd := Fd{Num: tableOperation.versionSet.allocFileNum(), FileType: KTableFile}
 	w, err := tableOperation.storage.Create(fd)
 	if err != nil {
-		tableOperation.session.reuseFileNum(fd.Num)
+		tableOperation.versionSet.reuseFileNum(fd.Num)
 		return nil, err
 	}
 	return &tWriter{

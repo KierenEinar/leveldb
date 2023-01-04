@@ -26,4 +26,5 @@ var (
 	ErrClosed                   = errors.New("leveldb/shutdown")
 	ErrFileIsDir                = errors.New("leveldb/path is dir")
 	ErrKeyDel                   = errors.New("leveldb/memdb key deleted")
+	ErrMissingCurrent           = errors.New("leveldb/open missing current, set CreateIfMissingCurrent true fix it")
 )

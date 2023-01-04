@@ -14,6 +14,7 @@ type KeyType uint8
 const (
 	KeyTypeValue KeyType = 0
 	KeyTypeDel   KeyType = 1
+	KeyTypeSeek          = KeyTypeValue
 )
 
 var (

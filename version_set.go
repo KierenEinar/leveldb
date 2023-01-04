@@ -1,11 +1,17 @@
 package leveldb
 
-import "C"
 import (
 	"bytes"
 	"container/list"
 	"encoding/binary"
 	"io"
+	"leveldb/collections"
+	"leveldb/comparer"
+	"leveldb/errors"
+	"leveldb/options"
+	"leveldb/storage"
+	"leveldb/utils"
+	"leveldb/wal"
 	"sort"
 	"sync"
 )
@@ -13,31 +19,26 @@ import (
 type VersionSet struct {
 	versions    *list.List
 	current     *Version
-	compactPtrs [kLevelNum]compactPtr
-	cmp         *iComparer
+	compactPtrs [options.KLevelNum]compactPtr
+	cmp         comparer.BasicComparer
 
 	comparerName   []byte
 	nextFileNum    uint64
 	stJournalNum   uint64
 	stSeqNum       Sequence // current memtable start seq num
-	manifestFd     Fd
-	manifestWriter *JournalWriter // lazy init
+	manifestFd     storage.Fd
+	manifestWriter *wal.JournalWriter
 
 	tableOperation *tableOperation
-
-	tableCache *TableCache
-
-	storage Storage
-
-	// todo move to db
-	snapshots *list.List
+	tableCache     *TableCache
+	storage        storage.Storage
 }
 
 type Version struct {
 	element *list.Element
 	vSet    *VersionSet
-	*BasicReleaser
-	levels [kLevelNum]tFiles
+	*utils.BasicReleaser
+	levels [options.KLevelNum]tFiles
 
 	// compaction
 	cScore float64
@@ -53,8 +54,8 @@ func newVersion(vSet *VersionSet) *Version {
 type vBuilder struct {
 	vSet     *VersionSet
 	base     *Version
-	inserted [kLevelNum]*tFileSortedSet
-	deleted  [kLevelNum]*uintSortedSet
+	inserted [options.KLevelNum]*tFileSortedSet
+	deleted  [options.KLevelNum]*uintSortedSet
 }
 
 func newBuilder(session *VersionSet, base *Version) *vBuilder {
@@ -62,10 +63,10 @@ func newBuilder(session *VersionSet, base *Version) *vBuilder {
 		vSet: session,
 		base: base,
 	}
-	for i := 0; i < kLevelNum; i++ {
+	for i := 0; i < options.KLevelNum; i++ {
 		builder.inserted[i] = newTFileSortedSet()
 	}
-	for i := 0; i < kLevelNum; i++ {
+	for i := 0; i < options.KLevelNum; i++ {
 		builder.deleted[i] = newUintSortedSet()
 	}
 	return builder
@@ -88,7 +89,7 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 
 func (builder *vBuilder) saveTo(v *Version) {
 
-	for level := 0; level < kLevelNum; level++ {
+	for level := 0; level < options.KLevelNum; level++ {
 		baseFile := v.levels[level]
 		beginPos := 0
 		iter := builder.inserted[level].NewIterator()
@@ -225,7 +226,7 @@ type tFileSortedSet struct {
 func newTFileSortedSet() *tFileSortedSet {
 	tSet := &tFileSortedSet{
 		anySortedSet: &anySortedSet{
-			BTree:                 InitBTree(3, &tFileComparer{}),
+			BTree:                 collections.InitBTree(3, &tFileComparer{}),
 			anySortedSetEncodeKey: encodeTFileToBinary,
 		},
 	}
@@ -276,7 +277,7 @@ func decodeBinaryToTFile(b []byte) (bool, InternalKey, uint64) {
 }
 
 type anySortedSet struct {
-	*BTree
+	*collections.BTree
 	anySortedSetEncodeKey
 	addValue bool
 	size     int
@@ -326,7 +327,7 @@ func (set *anySortedSet) contains(item interface{}) bool {
 // caller should hold a mutex
 func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) error {
 
-	assertMutexHeld(mutex)
+	utils.AssertMutexHeld(mutex)
 
 	/**
 	case 1: compactMemtable
@@ -345,14 +346,14 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 	to protect.
 	*/
 	if edit.hasRec(kJournalNum) {
-		assert(edit.journalNum >= vSet.stJournalNum)
-		assert(edit.journalNum < vSet.nextFileNum)
+		utils.Assert(edit.journalNum >= vSet.stJournalNum)
+		utils.Assert(edit.journalNum < vSet.nextFileNum)
 	} else {
 		edit.journalNum = vSet.stJournalNum
 	}
 
 	if edit.hasRec(kSeqNum) {
-		assert(edit.lastSeq >= vSet.stSeqNum)
+		utils.Assert(edit.lastSeq >= vSet.stSeqNum)
 	} else {
 		edit.lastSeq = vSet.stSeqNum
 	}
@@ -369,7 +370,7 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 	mutex.Unlock() // cause compaction is run in single thread, so we can avoid expensive write syscall
 
 	var (
-		writer         SequentialWriter
+		writer         storage.SequentialWriter
 		storage        = vSet.storage
 		manifestWriter = vSet.manifestWriter
 		manifestFd     = vSet.manifestFd
@@ -604,20 +605,23 @@ const (
 
 func (v *Version) get(ikey InternalKey, value *[]byte) (err error) {
 
-	userKey := ikey.ukey()
+	userKey := ikey.UserKey()
 	stat := kStatNotFound
 
 	match := func(level int, tFile tFile) bool {
-		getErr := v.vSet.tableCache.Get(ikey, tFile, func(rkey InternalKey, rValue []byte) {
+		getErr := v.vSet.tableCache.Get(ikey, tFile, func(rkey InternalKey, rValue []byte, rErr error) {
+			if rErr == errors.ErrNotFound {
+				stat = kStatNotFound
+			}
 			ukey, kt, _, pErr := parseInternalKey(rkey)
 			if pErr != nil {
 				stat = kStatCorruption
 			} else if bytes.Compare(ukey, userKey) == 0 {
 				switch kt {
-				case keyTypeValue:
+				case KeyTypeValue:
 					*value = rValue
 					stat = kStatFound
-				case keyTypeDel:
+				case KeyTypeDel:
 					stat = kStatDelete
 				}
 			}
@@ -651,9 +655,9 @@ func (v *Version) get(ikey InternalKey, value *[]byte) (err error) {
 
 	switch stat {
 	case kStatNotFound, kStatDelete:
-		err = ErrNotFound
+		err = errors.ErrNotFound
 	case kStatCorruption:
-		err = NewErrCorruption("leveldb/get key corruption")
+		err = errors.NewErrCorruption("leveldb/get key corruption")
 	}
 
 	return

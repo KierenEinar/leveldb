@@ -1,4 +1,4 @@
-package sstable
+package wal
 
 import (
 	"bytes"
@@ -48,15 +48,13 @@ const (
 
 type JournalWriter struct {
 	err         error
-	dest        *writableFile
+	w           storage.SequentialWriter
 	blockOffset int
 }
 
 func NewJournalWriter(writer storage.SequentialWriter) *JournalWriter {
 	return &JournalWriter{
-		dest: &writableFile{
-			w: writer,
-		},
+		w: writer,
 	}
 }
 
@@ -88,7 +86,7 @@ func (jw *JournalWriter) Write(chunk []byte) (n int, err error) {
 		blockRemain = kJournalBlockSize - (jw.blockOffset + journalBlockHeaderLen)
 
 		if blockRemain < journalBlockHeaderLen {
-			_ = jw.dest.append(make([]byte, blockRemain))
+			_, _ = jw.w.Write(make([]byte, blockRemain))
 			jw.blockOffset = 0
 			continue
 		}
@@ -139,78 +137,25 @@ func (jw *JournalWriter) writePhysicalRecord(data []byte, chunkType byte) error 
 	binary.LittleEndian.PutUint16(record[4:], uint16(avail))
 	record[6] = chunkType
 	jw.blockOffset += journalBlockHeaderLen
-	err := jw.dest.append(record)
+	_, err := jw.w.Write(record)
 	if err != nil {
 		return err
 	}
 	jw.blockOffset += avail
-	err = jw.dest.append(data)
+	_, err = jw.w.Write(data)
 	if err != nil {
 		return err
 	}
-	return jw.dest.flush()
+	return jw.w.Flush()
 }
 
 func (jw *JournalWriter) Close() error {
-	return jw.dest.Close()
+	_ = jw.w.Sync()
+	return jw.w.Close()
 }
 
 func (jw *JournalWriter) Sync() error {
-	return jw.dest.w.Sync()
-}
-
-type writableFile struct {
-	optionFlush bool
-	w           storage.SequentialWriter
-	pos         int
-	buf         [kWritableBufferSize]byte
-}
-
-func (w *writableFile) append(data []byte) error {
-
-	writeSize := len(data)
-	copySize := copy(w.buf[w.pos:], data)
-	// buf can hold entire data
-	if copySize == writeSize {
-		w.pos += copySize
-		return nil
-	}
-
-	// buf is full and still need to add the data
-	// so just writer to file and clear the buf
-	if err := w.flush(); err != nil {
-		return err
-	}
-
-	// calculate remain write size
-	writeSize -= copySize
-	if writeSize <= kWritableBufferSize {
-		n := copy(w.buf[:], data[copySize:])
-		w.pos = n
-		return nil
-	}
-
-	// otherwise, the data is too large, so write to file direct
-	if _, err := w.w.Write(data); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (w *writableFile) flush() error {
-	if w.pos == 0 {
-		return nil
-	}
-	_, err := w.w.Write(w.buf[:w.pos])
-	w.pos = 0
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (w *writableFile) Close() error {
-	return w.w.Close()
+	return jw.w.Sync()
 }
 
 // JournalReader journal reader
