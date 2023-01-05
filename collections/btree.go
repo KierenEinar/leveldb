@@ -203,7 +203,7 @@ func remove(node *BTreeNode, key []byte, cmp comparer.BasicComparer) bool {
 
 				mostlyPrevious := prevSibling
 
-				// search mostly previous key
+				// search mostly previous Key
 				for !mostlyPrevious.isLeaf {
 					mostlyPrevious = mostlyPrevious.siblings[mostlyPrevious.num]
 				}
@@ -516,7 +516,7 @@ func (iter *BTreeIter) Next() bool {
 	return iter.SeekFirst()
 }
 
-// Seek seeks a key that gte than input key
+// Seek seeks a Key that gte than input Key
 func (iter *BTreeIter) Seek(key []byte) bool {
 
 	// reset stack

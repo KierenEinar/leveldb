@@ -357,7 +357,8 @@ func (w *WritableFile) writeData(p []byte) (n int, err error) {
 
 type FileWrapper struct {
 	*os.File
-	fs *FileStorage
+	fs      *FileStorage
+	byteBuf [1]byte
 }
 
 func (fw *FileWrapper) Close() error {
@@ -418,8 +419,7 @@ func (fs *FileStorage) NewSequentialReader(fd Fd) (r SequentialReader, err error
 }
 
 func (fw *FileWrapper) ReadByte() (b byte, err error) {
-	p := make([]byte, 1)
-	n, err := fw.File.Read(p)
+	n, err := fw.File.Read(fw.byteBuf[:])
 	if err != nil {
 		return
 	}
@@ -428,7 +428,7 @@ func (fw *FileWrapper) ReadByte() (b byte, err error) {
 		return
 	}
 	if n > 0 {
-		b = p[0]
+		b = fw.byteBuf[0]
 	}
 	return
 }

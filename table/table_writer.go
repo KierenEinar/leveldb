@@ -268,6 +268,14 @@ type Writer struct {
 	cmp     comparer.Comparer
 }
 
+func NewWriter(writer storage.SequentialWriter, iFilter filter.IFilter, cmp comparer.Comparer) *Writer {
+	return &Writer{
+		writer:  writer,
+		iFilter: iFilter,
+		cmp:     cmp,
+	}
+}
+
 func (tableWriter *Writer) Append(ikey, value []byte) error {
 
 	dataBlock := tableWriter.dataBlock
@@ -440,6 +448,6 @@ func (tableWriter *Writer) flushFooter(indexBH, metaBH blockHandle) error {
 	return nil
 }
 
-func (tableWriter *Writer) fileSize() int {
+func (tableWriter *Writer) FileSize() int {
 	return tableWriter.offset
 }

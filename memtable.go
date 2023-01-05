@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"leveldb/collections"
 	"leveldb/comparer"
-	"leveldb/ikey"
 	"time"
 )
 
@@ -21,24 +20,23 @@ func NewMemTable(capacity int, cmp comparer.BasicComparer) *MemDB {
 	return memDB
 }
 
-func (memTable *MemDB) Put(ukey []byte, sequence ikey.Sequence, value []byte) error {
-	ikey := ikey.BuildInternalKey(nil, ukey, ikey.KeyTypeValue, sequence)
+func (memTable *MemDB) Put(ukey []byte, sequence Sequence, value []byte) error {
+	ikey := BuildInternalKey(nil, ukey, KeyTypeValue, sequence)
 	return memTable.SkipList.Put(ikey, value)
 }
 
-func (memTable *MemDB) Del(ukey []byte, sequence ikey.Sequence) error {
-	ikey := ikey.BuildInternalKey(nil, ukey, ikey.KeyTypeDel, sequence)
+func (memTable *MemDB) Del(ukey []byte, sequence Sequence) error {
+	ikey := BuildInternalKey(nil, ukey, KeyTypeDel, sequence)
 	return memTable.SkipList.Put(ikey, nil)
 }
 
 // Find find the ukey whose eq ikey.uKey(), if keytype is del, err is ErrNotFound, and will return the rkey
-func (memTable *MemDB) Find(ikey ikey.InternalKey) (rkey []byte, value []byte, err error) {
-	node, _, err := memTable.SkipList.FindGreaterOrEqual(ikey)
+func (memTable *MemDB) Find(ukey []byte) (rkey []byte, value []byte, err error) {
+	node, _, err := memTable.SkipList.FindGreaterOrEqual(ukey)
 	if err != nil {
 		return
 	}
 	if node != nil { // node is ge ikey
-		memTable.SkipList.rw.RLock()
 		ikeyN := node.key(memTable.SkipList.kvData)
 		valueN := node.value(memTable.SkipList.kvData)
 		memTable.SkipList.rw.RUnlock()

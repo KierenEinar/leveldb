@@ -2,9 +2,13 @@ package leveldb
 
 import (
 	"bytes"
+	"leveldb/iterator"
 	"leveldb/options"
+	"leveldb/storage"
+	"leveldb/table"
 	"leveldb/utils"
 	"sort"
+	"unsafe"
 )
 
 type tFile struct {
@@ -13,6 +17,28 @@ type tFile struct {
 	iMin       InternalKey
 	size       int
 	allowSeeks int
+}
+
+type tFileHeader struct {
+	addr uintptr
+	len  int
+	cap  int
+}
+
+func encodeTFile(t *tFile) []byte {
+	l := unsafe.Sizeof(t)
+	header := &tFileHeader{
+		addr: uintptr(unsafe.Pointer(t)),
+		len:  int(l),
+		cap:  int(l),
+	}
+	data := *(*[]byte)(unsafe.Pointer(header))
+	return data
+}
+
+func decodeTFile(buf []byte) *tFile {
+	tFile := *(**tFile)(unsafe.Pointer(&buf))
+	return tFile
 }
 
 type tFiles []tFile
@@ -110,14 +136,12 @@ func (vSet *VersionSet) createNewTable(fd Fd, fileSize int) (*TableWriter, error
 }
 
 type tableOperation struct {
-	versionSet *VersionSet
-	opt        *options.Options
+	opt *options.Options
 }
 
-func newTableOperation(opt *options.Options, vs *VersionSet) *tableOperation {
+func newTableOperation(opt *options.Options) *tableOperation {
 	return &tableOperation{
-		versionSet: vs,
-		opt:        opt,
+		opt: opt,
 	}
 }
 
@@ -129,7 +153,7 @@ func (tableOperation *tableOperation) open(f tFile) (*TableReader, error) {
 	return NewTableReader(reader, f.Size)
 }
 
-func (tableOperation *tableOperation) newIterator(f TFile) (Iterator, error) {
+func (tableOperation *tableOperation) newIterator(f tFile) (iterator.Iterator, error) {
 	tr, err := tableOperation.open(f)
 	if err != nil {
 		return nil, err
@@ -137,26 +161,27 @@ func (tableOperation *tableOperation) newIterator(f TFile) (Iterator, error) {
 	return tr.NewIterator()
 }
 
-func (tableOperation *tableOperation) create() (*tWriter, error) {
-	fd := Fd{Num: tableOperation.versionSet.allocFileNum(), FileType: KTableFile}
-	w, err := tableOperation.storage.Create(fd)
+func (tableOperation *tableOperation) create(tableCache *TableCache, fileMeta tFile) (*tWriter, error) {
+	w, err := tableOperation.opt.Storage.NewWritableFile(storage.Fd{
+		FileType: storage.KTableFile,
+		Num:      uint64(fileMeta.fd),
+	})
 	if err != nil {
-		tableOperation.versionSet.reuseFileNum(fd.Num)
 		return nil, err
 	}
 	return &tWriter{
-		fd:    fd,
-		fw:    w,
-		tw:    NewTableWriter(w),
-		first: nil,
-		last:  nil,
+		w:          w,
+		fileMeta:   fileMeta,
+		tableCache: tableCache,
+		tw:         table.NewWriter(w, tableOperation.opt.FilterPolicy, tableOperation.opt.InternalComparer),
 	}, nil
 }
 
 type tWriter struct {
-	fd          Fd
-	fw          SequentialWriter
-	tw          *TableWriter
+	w           storage.SequentialWriter
+	fileMeta    tFile
+	tw          *table.Writer
+	tableCache  *TableCache
 	first, last InternalKey
 }
 
@@ -168,34 +193,37 @@ func (t *tWriter) append(ikey InternalKey, value []byte) error {
 	return t.tw.Append(ikey, value)
 }
 
-func (t *tWriter) finish() (*TFile, error) {
+func (t *tWriter) finish() error {
 
 	err := t.tw.Close()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	err = t.fw.Sync()
+	err = t.w.Sync()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	err = t.fw.Close()
+	err = t.w.Close()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return &TFile{
-		fd:   t.fd,
-		iMax: t.last,
-		iMin: t.first,
-		Size: t.tw.fileSize(),
-	}, nil
+	iter, err := t.tableCache.NewIterator(t.fileMeta)
+	if err == nil {
+		iter.UnRef()
+	}
+
+	t.fileMeta.iMax = t.last
+	t.fileMeta.iMin = t.first
+	t.fileMeta.size = t.size()
+	return nil
 
 }
 
 func (t *tWriter) size() int {
-	return t.tw.fileSize()
+	return t.tw.FileSize()
 }
 
 type tFileArrIteratorIndexer struct {

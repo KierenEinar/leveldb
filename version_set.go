@@ -20,7 +20,7 @@ type VersionSet struct {
 	versions    *list.List
 	current     *Version
 	compactPtrs [options.KLevelNum]compactPtr
-	cmp         comparer.BasicComparer
+	cmp         comparer.Comparer
 
 	comparerName   []byte
 	nextFileNum    uint64
@@ -58,13 +58,13 @@ type vBuilder struct {
 	deleted  [options.KLevelNum]*uintSortedSet
 }
 
-func newBuilder(session *VersionSet, base *Version) *vBuilder {
+func newBuilder(vSet *VersionSet, base *Version) *vBuilder {
 	builder := &vBuilder{
-		vSet: session,
+		vSet: vSet,
 		base: base,
 	}
 	for i := 0; i < options.KLevelNum; i++ {
-		builder.inserted[i] = newTFileSortedSet()
+		builder.inserted[i] = newTFileSortedSet(vSet.cmp)
 	}
 	for i := 0; i < options.KLevelNum; i++ {
 		builder.deleted[i] = newUintSortedSet()
@@ -82,8 +82,8 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 	}
 	for _, addTable := range edit.addedTables {
 		level, number := addTable.level, addTable.number
+		utils.Assert(level <= options.KLevelNum)
 		builder.deleted[level].remove(number)
-
 		tFile := &tFile{
 			fd:   int(addTable.number),
 			iMax: addTable.imax,
@@ -91,7 +91,7 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 			size: addTable.size,
 		}
 
-		allowSeeks := addTable.size / 1 << 15
+		allowSeeks := addTable.size / 1 << 14
 		if allowSeeks < 100 {
 			allowSeeks = 100
 		}
@@ -103,20 +103,17 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 func (builder *vBuilder) saveTo(v *Version) {
 
 	for level := 0; level < options.KLevelNum; level++ {
-		baseFile := v.levels[level]
+		baseFile := builder.base.levels[level]
 		beginPos := 0
 		iter := builder.inserted[level].NewIterator()
 		v.levels[level] = make(tFiles, 0, len(baseFile)+builder.inserted[level].size) // reverse pre alloc capacity
 		for iter.Next() {
-			addTable, ok := iter.Value().(tFile)
-			if !ok {
-				panic("vBuilder iter convert value to tFile failed...")
-			}
-			pos := upperBound(baseFile, level, iter, builder.vSet.cmp)
+			tFile := decodeTFile(iter.Key())
+			pos := upperBound(baseFile, level, tFile, builder.vSet.cmp)
 			for i := beginPos; i < pos; i++ {
 				builder.maybeAddFile(v, baseFile[i], level)
 			}
-			builder.maybeAddFile(v, addTable, level)
+			builder.maybeAddFile(v, *tFile, level)
 			beginPos = pos
 		}
 
@@ -127,35 +124,30 @@ func (builder *vBuilder) saveTo(v *Version) {
 
 }
 
-func upperBound(s tFiles, level int, iter *BTreeIter, cmp BasicComparer) int {
-
-	ok, ikey, fileNum := decodeBinaryToTFile(iter.Key())
-	if !ok {
-		panic("leveldb decodeBinaryToTFile failed")
-	}
+func upperBound(s tFiles, level int, tFile *tFile, cmp comparer.BasicComparer) int {
 
 	if level == 0 {
 		idx := sort.Search(len(s), func(i int) bool {
-			return s[i].fd.Num > fileNum
+			return s[i].fd > tFile.fd
 		})
 		return idx
 	}
 	idx := sort.Search(len(s), func(i int) bool {
-		return cmp.Compare(s[i].iMax, ikey) > 0
+		return cmp.Compare(s[i].iMax, tFile.iMax) > 0
 	})
 	return idx
 }
 
 func (builder *vBuilder) maybeAddFile(v *Version, file tFile, level int) {
 
-	if builder.deleted[level].contains(file.fd.Num) {
+	if builder.deleted[level].contains(file.fd) {
 		return
 	}
 
 	files := v.levels[level]
 	cmp := builder.vSet.cmp
 	if level > 0 && len(files) > 0 {
-		assert(cmp.Compare(files[len(files)-1].iMax, file.iMin) < 0)
+		utils.Assert(cmp.Compare(files[len(files)-1].iMax, file.iMin) < 0)
 	}
 
 	v.levels[level] = append(v.levels[level], file)
@@ -168,7 +160,7 @@ type uintSortedSet struct {
 func newUintSortedSet() *uintSortedSet {
 	uSet := &uintSortedSet{
 		anySortedSet: &anySortedSet{
-			BTree:                 InitBTree(3, &uint64Comparer{}),
+			BTree:                 collections.InitBTree(3, &uint64Comparer{}),
 			anySortedSetEncodeKey: encodeUint64ToBinary,
 		},
 	}
@@ -236,10 +228,12 @@ type tFileSortedSet struct {
 	*anySortedSet
 }
 
-func newTFileSortedSet() *tFileSortedSet {
+func newTFileSortedSet(iComparer *iComparer) *tFileSortedSet {
 	tSet := &tFileSortedSet{
 		anySortedSet: &anySortedSet{
-			BTree:                 collections.InitBTree(3, &tFileComparer{}),
+			BTree: collections.InitBTree(3, &tFileComparer{
+				iComparer: iComparer,
+			}),
 			anySortedSetEncodeKey: encodeTFileToBinary,
 		},
 	}
@@ -251,18 +245,18 @@ type tFileComparer struct {
 }
 
 func (tc *tFileComparer) Compare(a, b []byte) int {
-
-	ia := a[:len(a)-8]
-	ib := a[:len(b)-8]
-	r := tc.iComparer.Compare(ia, ib)
+	tFileA, tFileB := decodeBinaryToTFile(a), decodeBinaryToTFile(b)
+	r := tc.iComparer.Compare(tFileA.iMax, tFileB.iMax)
 	if r != 0 {
 		return r
 	}
-
-	if aNum, bNum := binary.LittleEndian.Uint64(a[len(a)-8:]), binary.LittleEndian.Uint64(b[len(b)-8:]); aNum < bNum {
+	if tFileA.fd < tFileB.fd {
 		return -1
+	} else if tFileA.fd == tFileB.fd {
+		return 0
+	} else {
+		return 1
 	}
-	return 1
 }
 
 func (tc *tFileComparer) Name() []byte {
@@ -274,19 +268,12 @@ func encodeTFileToBinary(item interface{}) (bool, []byte) {
 	if !ok {
 		return false, nil
 	}
-	fileNum := make([]byte, 8)
-	binary.LittleEndian.PutUint64(fileNum, tFile.fd.Num)
-	key := append(tFile.iMax, fileNum...)
+	key := encodeTFile(&tFile)
 	return true, key
 }
 
-func decodeBinaryToTFile(b []byte) (bool, InternalKey, uint64) {
-	if len(b) < 16 {
-		return false, nil, 0
-	}
-	fileNumBuf := b[len(b)-8:]
-	fileNum := binary.LittleEndian.Uint64(fileNumBuf)
-	return true, InternalKey(b[:len(b)-8]), fileNum
+func decodeBinaryToTFile(b []byte) *tFile {
+	return decodeTFile(b)
 }
 
 type anySortedSet struct {
@@ -507,9 +494,7 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	)
 
 	vBuilder := newBuilder(vSet, nil)
-
 	journalReader := wal.NewJournalReader(reader)
-	vBuilder.vSet = vSet
 	for {
 
 		chunkReader, err := journalReader.NextChunk()

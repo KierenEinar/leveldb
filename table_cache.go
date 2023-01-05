@@ -76,7 +76,7 @@ func (c *TableCache) Evict(tFile tFile) {
 
 func (c *TableCache) findTable(tFile tFile, cacheHandle **cache.LRUHandle) (err error) {
 	lookupKey := make([]byte, 8)
-	binary.LittleEndian.PutUint64(lookupKey[8:], tFile.fd.Num)
+	binary.LittleEndian.PutUint64(lookupKey[8:], uint64(tFile.fd))
 	handle := c.cache.Lookup(lookupKey)
 	if handle == nil {
 		reader, oErr := c.storage.NewRandomAccessReader(tFile.fd)

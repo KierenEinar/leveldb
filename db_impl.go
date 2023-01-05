@@ -450,12 +450,21 @@ func (db *DB) compactMemTable() {
 	}
 }
 
-func (db *DB) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err error) {
+func (dbImpl *DBImpl) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err error) {
 
-	db.rwMutex.Unlock()
-	defer db.rwMutex.Lock()
+	utils.AssertMutexHeld(&dbImpl.rwMutex)
 
-	tWriter, err := db.tableOperation.create()
+	var fileMeta tFile
+	fileMeta.fd = int(dbImpl.versionSet.allocFileNum())
+	dbImpl.rwMutex.Unlock()
+	defer func() {
+		dbImpl.rwMutex.Lock()
+		if err != nil {
+			dbImpl.versionSet.reuseFileNum(uint64(fileMeta.fd))
+		}
+	}()
+
+	tWriter, err := dbImpl.tableOperation.create(dbImpl.tableCache, fileMeta)
 	if err != nil {
 		return err
 	}
@@ -466,14 +475,14 @@ func (db *DB) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err error) {
 	for iter.Next() {
 		err = tWriter.append(iter.Key(), iter.Value())
 		if err != nil {
-			db.rwMutex.Lock()
 			return err
 		}
 	}
 
-	tFile, err := tWriter.finish()
+	err = tWriter.finish()
 	if err == nil {
-		edit.addNewTable(0, tFile.Size, tFile.fd.Num, tFile.iMin, tFile.iMax)
+		fileMeta = tWriter.fileMeta
+		edit.addNewTable(0, fileMeta.size, uint64(fileMeta.fd), fileMeta.iMin, fileMeta.iMax)
 	}
 	return
 }
@@ -538,27 +547,17 @@ func (dbImpl *DBImpl) recover() error {
 
 	err = dbImpl.versionSet.recover(manifestFd)
 
-	fds, err := db.VersionSet.storage.List()
+	fds, err := dbImpl.opt.Storage.List()
 	if err != nil {
 		return err
 	}
 
-	var expectedFiles = make(map[uint64]struct{})
-	db.VersionSet.addLiveFiles(expectedFiles)
-
-	logFiles := make([]Fd, 0)
+	logFiles := make([]storage.Fd, 0)
 
 	for _, fd := range fds {
-		if fd.FileType == KTableFile {
-			delete(expectedFiles, fd.Num)
-		} else if fd.FileType == KJournalFile && fd.Num >= db.VersionSet.stJournalNum {
+		if fd.FileType == storage.KJournalFile && fd.Num >= dbImpl.versionSet.stJournalNum {
 			logFiles = append(logFiles, fd)
 		}
-	}
-
-	if len(expectedFiles) > 0 {
-		err = NewErrCorruption("invalid table file, file not exists")
-		return err
 	}
 
 	sort.Slice(logFiles, func(i, j int) bool {
@@ -568,7 +567,7 @@ func (dbImpl *DBImpl) recover() error {
 	var edit VersionEdit
 
 	for _, logFile := range logFiles {
-		err = db.recoverLogFile(logFile, &edit)
+		err = dbImpl.recoverLogFile(logFile, &edit)
 		if err != nil {
 			return err
 		}
@@ -625,14 +624,14 @@ func (dbImpl *DBImpl) newDb() (err error) {
 	return
 }
 
-func (db *DB) recoverLogFile(fd Fd, edit *VersionEdit) error {
+func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 
-	reader, err := db.VersionSet.storage.Open(fd)
+	reader, err := dbImpl.opt.Storage.NewSequentialReader(fd)
 	if err != nil {
 		return err
 	}
-	journalReader := NewJournalReader(reader)
-	memDB := NewMemTable(0, db.VersionSet.cmp)
+	journalReader := wal.NewJournalReader(reader)
+	memDB := NewMemTable(0, dbImpl.opt.InternalComparer)
 	memDB.Ref()
 	defer func() {
 		memDB.UnRef()
@@ -645,20 +644,17 @@ func (db *DB) recoverLogFile(fd Fd, edit *VersionEdit) error {
 		if err == io.EOF {
 			break
 		}
-		writeBatch, err := buildBatchGroup(sequentialReader, db.VersionSet.stSeqNum)
-
+		writeBatch, err := decodeBatchChunk(sequentialReader, dbImpl.versionSet.stSeqNum)
 		if err != nil {
 			return err
 		}
-
-		if memDB.ApproximateSize() > kMemTableWriteBufferSize {
-			err = db.writeLevel0Table(memDB, edit)
+		if memDB.ApproximateSize() > options.KMemTableWriteBufferSize {
+			err = dbImpl.writeLevel0Table(memDB, edit)
 			if err != nil {
 				return err
 			}
 			memDB.UnRef()
-
-			memDB = NewMemTable(0, db.VersionSet.cmp)
+			memDB = NewMemTable(0, dbImpl.versionSet.cmp)
 			memDB.Ref()
 		}
 
@@ -667,10 +663,8 @@ func (db *DB) recoverLogFile(fd Fd, edit *VersionEdit) error {
 			return err
 		}
 
-		db.seqNum += writeBatch.seq + Sequence(writeBatch.count) - 1
-
-		db.VersionSet.markFileUsed(fd.Num)
-
+		dbImpl.seqNum += writeBatch.seq + Sequence(writeBatch.count) - 1
+		dbImpl.versionSet.markFileUsed(fd.Num)
 	}
 
 	if memDB.Size() > 0 {
@@ -767,6 +761,6 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	}
 
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
-	db.tableOperation = newTableOperation(opt, db.versionSet)
+	db.tableOperation = newTableOperation(opt)
 	return db
 }
