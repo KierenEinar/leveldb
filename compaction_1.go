@@ -3,6 +3,7 @@ package leveldb
 import (
 	"bytes"
 	"leveldb/comparer"
+	"leveldb/iterator"
 	"leveldb/options"
 	"leveldb/utils"
 	"sort"
@@ -10,10 +11,10 @@ import (
 )
 
 type compaction1 struct {
-	inputs [2]tFiles
-	levels Levels
-
-	version *Version
+	inputs      [2]tFiles
+	levels      Levels
+	sourceLevel int
+	version     *Version
 
 	cPtr compactPtr
 
@@ -24,60 +25,59 @@ type compaction1 struct {
 
 	inputOverlappedGPIndex int
 
-	cmp comparer.Comparer
+	opt *options.Options
 
 	minSeq         Sequence
 	tWriter        *tWriter
 	tableOperation *tableOperation
+	tableCache     *TableCache
 	edit           VersionEdit
 
 	baseLevelI [options.KLevelNum]int
 }
 
 func (vSet *VersionSet) pickCompaction1() *compaction1 {
-	sizeCompaction := vSet.current.cScore >= 1
 
-	if !sizeCompaction {
-		return nil
-	}
+	version := vSet.current
+	version.Ref()
 
-	cLevel := vSet.current.cLevel
-	utils.Assert(cLevel < options.KLevelNum)
-
-	level := vSet.current.levels[cLevel]
-
+	sizeCompaction := version.cScore >= 1
+	seekCompaction := version.fileToCompact != nil
 	inputs := make(tFiles, 0)
-
-	cPtr := vSet.compactPtrs[cLevel]
-	if cPtr.ikey != nil {
-
-		idx := sort.Search(len(level), func(i int) bool {
-			return vSet.cmp.Compare(level[i].iMax, cPtr.ikey) > 0
-		})
-
-		if idx < len(level) {
-			inputs = append(inputs, level[idx])
+	var sourceLevel int
+	if sizeCompaction {
+		level := vSet.current.levels[version.cLevel]
+		cPtr := vSet.compactPtrs[version.cLevel]
+		sourceLevel = version.cLevel
+		if version.cLevel > 0 && cPtr != nil {
+			idx := sort.Search(len(level), func(i int) bool {
+				return vSet.opt.InternalComparer.Compare(level[i].iMax, cPtr.ikey) > 0
+			})
+			if idx < len(level) {
+				inputs = append(inputs, level[idx])
+			}
 		}
+		if len(inputs) == 0 {
+			inputs = append(inputs, level[0])
+		}
+	} else if seekCompaction {
+		inputs = append(inputs, *version.fileToCompact)
+		sourceLevel = version.fileToCompactLevel
 	}
 
-	if len(inputs) == 0 {
-		inputs = append(inputs, level[0])
-	}
-
-	return newCompaction1(inputs, cPtr, vSet.current, vSet.tableOperation,
-		vSet.current.levels, vSet.cmp)
+	return newCompaction1(inputs, sourceLevel, version, vSet.tableOperation,
+		vSet.current.levels, vSet.opt)
 }
 
-func newCompaction1(inputs tFiles, cPtr compactPtr, version *Version, tableOperation *tableOperation,
-	levels Levels, cmp BasicComparer) *compaction1 {
-	version.Ref()
+func newCompaction1(inputs tFiles, sourceLevel int, version *Version, tableOperation *tableOperation,
+	levels Levels, opt *options.Options) *compaction1 {
 	c := &compaction1{
 		inputs:            [2]tFiles{inputs},
+		sourceLevel:       sourceLevel,
 		version:           version,
 		levels:            levels,
-		cPtr:              cPtr,
-		cmp:               cmp,
-		gpOverlappedLimit: defaultGPOverlappedLimit * defaultCompactionTableSize,
+		opt:               opt,
+		gpOverlappedLimit: opt.GPOverlappedLimit * int(opt.MaxEstimateFileSize),
 		tableOperation:    tableOperation,
 	}
 	c.expand()
@@ -88,38 +88,38 @@ func (c *compaction1) expand() {
 
 	t0, t1 := c.inputs[0], c.inputs[1]
 
-	vs0, vs1 := c.levels[c.cPtr.level], c.levels[c.cPtr.level+1]
+	vs0, vs1 := c.levels[c.sourceLevel], c.levels[c.sourceLevel+1]
 
-	imin, imax := append(t0, t1...).getRange1(c.cmp)
-	if c.cPtr.level == 0 {
+	imin, imax := append(t0, t1...).getRange1(c.opt.InternalComparer)
+	if c.sourceLevel == 0 {
 		vs0.getOverlapped1(&t0, imin, imax, true)
 
 		// recalculate the imin and imax
-		imin, imax = append(t0, t1...).getRange1(c.cmp)
+		imin, imax = append(t0, t1...).getRange1(c.opt.InternalComparer)
 	}
 
 	vs1.getOverlapped1(&t1, imin, imax, false)
 
-	imin, imax = append(t0, t1...).getRange1(c.cmp)
+	imin, imax = append(t0, t1...).getRange1(c.opt.InternalComparer)
 	var tmpT0 tFiles
-	vs0.getOverlapped1(&tmpT0, imin, imax, c.cPtr.level == 0)
+	vs0.getOverlapped1(&tmpT0, imin, imax, c.sourceLevel == 0)
 
 	// see if we can expand the input 0 level file
 	if len(tmpT0) > len(t0) {
-		amin, amax := append(tmpT0, t1...).getRange1(c.cmp)
+		amin, amax := append(tmpT0, t1...).getRange1(c.opt.InternalComparer)
 		var tmpT1 tFiles
 		vs1.getOverlapped1(&tmpT1, amin, amax, false)
 		// compact level must not change
-		if len(tmpT1) == len(t1) && tmpT0.size()+vs1.size() < defaultCompactionTableSize*defaultCompactionExpandS0LimitFactor {
+		if len(tmpT1) == len(t1) && tmpT0.size()+vs1.size() < int(c.opt.MaxEstimateFileSize*c.opt.MaxCompactionLimitFactor) {
 			t0 = tmpT0
 			imin, imax = amin, amax
 		}
 	}
 
 	// calculate the grand parent's
-	gpLevel := c.cPtr.level + 2
-	if gpLevel < kLevelNum {
-		vs2 := c.levels[c.cPtr.level+2]
+	gpLevel := c.sourceLevel + 2
+	if gpLevel < options.KLevelNum {
+		vs2 := c.levels[gpLevel]
 		vs2.getOverlapped1(&c.gp, imin, imax, false)
 	}
 
@@ -127,15 +127,15 @@ func (c *compaction1) expand() {
 
 func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax InternalKey, overlapped bool) {
 
-	umin := imin.ukey()
-	umax := imax.ukey()
+	umin := imin.UserKey()
+	umax := imax.UserKey()
 
 	if overlapped {
 		i := 0
 		for ; i < len(tFiles); i++ {
 			if tFiles[i].overlapped1(imin, imax) {
-				tMinR := bytes.Compare(tFiles[i].iMin.ukey(), umin)
-				tMaxR := bytes.Compare(tFiles[i].iMax.ukey(), umax)
+				tMinR := bytes.Compare(tFiles[i].iMin.UserKey(), umin)
+				tMaxR := bytes.Compare(tFiles[i].iMax.UserKey(), umax)
 
 				if tMinR >= 0 && tMaxR <= 0 {
 					*dst = append(*dst, tFiles[i])
@@ -143,10 +143,10 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax Internal
 					i = 0
 					*dst = (*dst)[:0]
 					if tMinR < 0 {
-						umin = tFiles[i].iMin.ukey()
+						umin = tFiles[i].iMin.UserKey()
 					}
 					if tMaxR > 0 {
-						umax = tFiles[i].iMax.ukey()
+						umax = tFiles[i].iMax.UserKey()
 					}
 				}
 			}
@@ -159,44 +159,44 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax Internal
 		)
 
 		idx := sort.Search(len(tFiles), func(i int) bool {
-			return bytes.Compare(tFiles[i].iMin.ukey(), umin) <= 0
+			return bytes.Compare(tFiles[i].iMin.UserKey(), umin) <= 0
 		})
 
 		if idx == 0 {
 			begin = 0
-		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMax.ukey(), umin) <= 0 {
+		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMax.UserKey(), umin) <= 0 {
 			begin -= 1
 		} else {
 			begin = idx
 		}
 
 		idx = sort.Search(len(tFiles), func(i int) bool {
-			return bytes.Compare(tFiles[i].iMax.ukey(), umax) >= 0
+			return bytes.Compare(tFiles[i].iMax.UserKey(), umax) >= 0
 		})
 
 		if idx == len(tFiles) {
 			end = idx
-		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMin.ukey(), umax) <= 0 {
+		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMin.UserKey(), umax) <= 0 {
 			end = idx + 1
 		} else {
 			end = idx
 		}
 
-		assert(end >= begin)
+		utils.Assert(end >= begin)
 		*dst = append(*dst, tFiles[begin:end]...)
 	}
 
 }
 
 func (tFile tFile) overlapped1(imin InternalKey, imax InternalKey) bool {
-	if bytes.Compare(tFile.iMax.ukey(), imin.ukey()) < 0 ||
-		bytes.Compare(tFile.iMin.ukey(), imax.ukey()) > 0 {
+	if bytes.Compare(tFile.iMax.UserKey(), imin.UserKey()) < 0 ||
+		bytes.Compare(tFile.iMin.UserKey(), imax.UserKey()) > 0 {
 		return false
 	}
 	return true
 }
 
-func (tFiles tFiles) getRange1(cmp BasicComparer) (imin, imax InternalKey) {
+func (tFiles tFiles) getRange1(cmp comparer.Comparer) (imin, imax InternalKey) {
 	for _, tFile := range tFiles {
 		if cmp.Compare(tFile.iMin, imin) < 0 {
 			imin = tFile.iMin
@@ -208,18 +208,19 @@ func (tFiles tFiles) getRange1(cmp BasicComparer) (imin, imax InternalKey) {
 	return
 }
 
-func (db *DB) doCompactionWork(c *compaction1) error {
+func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 
-	if db.VersionSet.snapshots.Len() == 0 {
-		c.minSeq = db.seqNum
+	if dbImpl.snapshots.Len() == 0 {
+		c.minSeq = dbImpl.seqNum
 	} else {
-		c.minSeq = db.VersionSet.snapshots.Front().Value.(Sequence)
+		c.minSeq = dbImpl.snapshots.Front().Value.(Sequence)
 	}
 
-	iter, iterErr := db.VersionSet.makeInputIterator(c)
+	iter, iterErr := c.makeInputIterator()
 	if iterErr != nil {
 		return iterErr
 	}
+	defer iter.UnRef()
 
 	db.rwMutex.Unlock()
 
@@ -298,8 +299,6 @@ func (db *DB) doCompactionWork(c *compaction1) error {
 		err = db.finishCompactionOutputFile(c)
 	}
 
-	iter.UnRef()
-
 	db.rwMutex.Lock()
 
 	if err == nil {
@@ -310,42 +309,32 @@ func (db *DB) doCompactionWork(c *compaction1) error {
 
 }
 
-func (vSet *VersionSet) makeInputIterator(c *compaction1) (iter Iterator, err error) {
+func (c *compaction1) makeInputIterator() (iter iterator.Iterator, err error) {
 
-	iters := make([]Iterator, 0)
-
-	defer func() {
-		if err != nil {
-			for _, iter := range iters {
-				iter.UnRef()
-			}
-			iters = nil
-		}
-	}()
+	iters := make([]iterator.Iterator, 0)
 
 	for which, inputs := range c.inputs {
-		if c.cPtr.level+which == 0 {
+		if c.sourceLevel+which == 0 {
 			for _, input := range inputs {
-				iter, err := vSet.newTableIterator(input)
+				iter, err := c.tableCache.NewIterator(input)
 				if err != nil {
 					return
 				}
 				iters = append(iters, iter)
 			}
-			iters = append(iters, iter)
 		} else {
-			iters = append(iters, newIndexedIterator(newTFileArrIteratorIndexer(inputs)))
+			iters = append(iters, iterator.NewIndexedIterator(newTFileArrIteratorIndexer(inputs, c.opt.InternalComparer)))
 		}
 	}
 
-	iter = NewMergeIterator(iters)
+	iter = iterator.NewMergeIterator(iters, c.opt.InternalComparer)
 
 	return
 }
 
 func (vSet *VersionSet) newTableIterator(tFile tFile) (Iterator, error) {
 
-	reader, err := vSet.storage.Open(tFile.fd)
+	reader, err := vSet.opt.Storage.Open(tFile.fd)
 	if err != nil {
 		return nil, err
 	}

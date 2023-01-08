@@ -219,14 +219,14 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 	}
 
 	tr := &Reader{
-		r:         r,
-		tableSize: fileSize,
-		cmp:       opt.InternalComparer,
-		opt:       opt,
+		r:             r,
+		tableSize:     fileSize,
+		cmp:           opt.InternalComparer,
+		opt:           opt,
+		BasicReleaser: &utils.BasicReleaser{},
 	}
-	tr.BasicReleaser = &utils.BasicReleaser{
-		OnClose: tr.Close,
-	}
+	tr.Ref()
+	tr.RegisterCleanUp(tr.Close)
 
 	footerBlockContent.data = *footerData
 	err = tr.readFooter(footerBlockContent)
@@ -483,7 +483,7 @@ func (reader *Reader) find(key []byte, noValue bool, filtered bool) (ikey []byte
 	return
 }
 
-func (reader *Reader) Close() {
+func (reader *Reader) Close(args ...interface{}) {
 	if reader.indexBlock != nil {
 		if reader.indexBlock.blockContent.poolable {
 			utils.PoolPutBytes(&reader.indexBlock.blockContent.data)
@@ -503,20 +503,24 @@ type indexIter struct {
 }
 
 func (reader *Reader) newIndexIter() *indexIter {
-	blockIter := newBlockIter(reader.indexBlock, reader.cmp)
+	bIter := newBlockIter(reader.indexBlock, reader.cmp)
 	ii := &indexIter{
-		blockIter: blockIter,
+		blockIter: bIter,
 		tr:        reader,
 		BasicReleaser: &utils.BasicReleaser{
-			OnClose: func() {
-				blockIter.UnRef()
-				reader.UnRef()
-			},
 			OnRef: func() {
 				reader.Ref()
 			},
 		},
 	}
+
+	ii.RegisterCleanUp(func(args ...interface{}) {
+		_reader := args[0].(*Reader)
+		_blockIter := args[1].(*blockIter)
+		_reader.UnRef()
+		_blockIter.UnRef()
+	}, reader, bIter)
+
 	ii.Ref()
 	return ii
 }

@@ -68,9 +68,9 @@ func (c *TableCache) releaseHandle(args ...interface{}) {
 	c.cache.UnRef(h)
 }
 
-func (c *TableCache) Evict(tFile tFile) {
+func (c *TableCache) Evict(fd uint64) {
 	lookupKey := make([]byte, 8)
-	binary.LittleEndian.PutUint64(lookupKey, tFile.fd.Num)
+	binary.LittleEndian.PutUint64(lookupKey, fd)
 	c.cache.Erase(lookupKey)
 }
 
@@ -79,12 +79,15 @@ func (c *TableCache) findTable(tFile tFile, cacheHandle **cache.LRUHandle) (err 
 	binary.LittleEndian.PutUint64(lookupKey[8:], uint64(tFile.fd))
 	handle := c.cache.Lookup(lookupKey)
 	if handle == nil {
-		reader, oErr := c.storage.NewRandomAccessReader(tFile.fd)
+		reader, oErr := c.storage.NewRandomAccessReader(storage.Fd{
+			FileType: storage.KTableFile,
+			Num:      uint64(tFile.fd),
+		})
 		if oErr != nil {
 			err = oErr
 			return
 		}
-		tReader, tErr := table.NewTableReader(c.opt, reader, tFile.Size)
+		tReader, tErr := table.NewTableReader(c.opt, reader, tFile.size)
 		if tErr != nil {
 			err = tErr
 			return

@@ -201,7 +201,6 @@ func (c *LRUCache) Insert(key []byte, hash uint32, charge uint32,
 	for c.usage > c.capacity && c.lru.next != &c.lru {
 		c.finishErase(c.table.Erase(c.lru.next.key, c.lru.next.hash))
 	}
-
 	return handle
 
 }

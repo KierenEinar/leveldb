@@ -29,7 +29,7 @@ type Iterator interface {
 	Value() []byte
 }
 
-type iteratorIndexer interface {
+type IteratorIndexer interface {
 	CommonIterator
 	Get() Iterator
 }
@@ -70,23 +70,25 @@ func (ei *EmptyIterator) Valid() error {
 
 type IndexedIterator struct {
 	*utils.BasicReleaser
-	indexed iteratorIndexer
+	indexed IteratorIndexer
 	data    Iterator
 	err     error
-	ikey    []byte
-	value   []byte
 }
 
-func NewIndexedIterator(indexed iteratorIndexer) Iterator {
+func NewIndexedIterator(indexed IteratorIndexer) Iterator {
+
 	ii := &IndexedIterator{
-		indexed: indexed,
+		indexed:       indexed,
+		BasicReleaser: &utils.BasicReleaser{},
 	}
-	ii.BasicReleaser = &utils.BasicReleaser{
-		OnClose: func() {
-			indexed.UnRef()
-			ii.clearData()
-		},
-	}
+
+	ii.Ref()
+
+	ii.RegisterCleanUp(func(args ...interface{}) {
+		ii.clearData()
+		ii.indexed.UnRef()
+	})
+
 	return ii
 }
 
@@ -97,8 +99,15 @@ func (iter *IndexedIterator) clearData() {
 	}
 }
 
-func (iter *IndexedIterator) setData() {
-	iter.data = iter.indexed.Get()
+func (iter *IndexedIterator) setData() bool {
+	iter.clearData()
+	dataIter := iter.indexed.Get()
+	if dataIter != nil {
+		dataIter.Ref()
+		iter.data = dataIter
+		return true
+	}
+	return false
 }
 
 func (iter *IndexedIterator) Next() bool {
@@ -116,11 +125,8 @@ func (iter *IndexedIterator) Next() bool {
 		return true
 	}
 
-	iter.clearData()
-
-	if iter.indexed.Next() {
-		iter.setData()
-		return iter.Next()
+	if iter.indexed.Next() && iter.setData() {
+		return iter.data.Next()
 	}
 
 	return false
@@ -137,13 +143,11 @@ func (iter *IndexedIterator) SeekFirst() bool {
 		return false
 	}
 
-	iter.clearData()
-	if !iter.indexed.SeekFirst() {
-		return false
+	if iter.indexed.SeekFirst() && iter.setData() {
+		return iter.data.SeekFirst()
 	}
 
-	iter.setData()
-	return iter.Next()
+	return false
 }
 
 func (iter *IndexedIterator) Seek(key []byte) bool {
@@ -156,8 +160,6 @@ func (iter *IndexedIterator) Seek(key []byte) bool {
 		return false
 	}
 
-	iter.clearData()
-
 	if !iter.indexed.Seek(key) {
 		return false
 	}
@@ -166,9 +168,7 @@ func (iter *IndexedIterator) Seek(key []byte) bool {
 
 	if !iter.data.Seek(key) {
 		iter.clearData()
-		if !iter.Next() {
-			return false
-		}
+		return iter.Next()
 	}
 
 	return true
@@ -200,16 +200,18 @@ type MergeIterator struct {
 	keys    [][]byte
 	iterIdx int // current iter need to fill the heap
 	dir     Direction
-	ikey    []byte
-	value   []byte
-	cmp     comparer.BasicComparer
+	cmp     comparer.Comparer
+
+	key   []byte
+	value []byte
 }
 
-func NewMergeIterator(iters []Iterator) *MergeIterator {
+func NewMergeIterator(iters []Iterator, cmp comparer.Comparer) *MergeIterator {
 
 	mi := &MergeIterator{
 		iters: iters,
 		keys:  make([][]byte, len(iters)),
+		cmp:   cmp,
 	}
 
 	mi.heap = collections.InitHeap(mi.minHeapLess)
@@ -219,8 +221,6 @@ func NewMergeIterator(iters []Iterator) *MergeIterator {
 			iters[i].UnRef()
 		}
 		mi.keys = mi.keys[:0]
-		mi.ikey = nil
-		mi.value = nil
 	}
 	return mi
 }
@@ -238,11 +238,10 @@ func (mi *MergeIterator) SeekFirst() bool {
 
 	mi.heap.Clear()
 	mi.dir = DirSOI
-	mi.ikey = mi.ikey[:0]
-	mi.value = mi.value[:0]
 	for i := 0; i < len(mi.iters); i++ {
 		iter := mi.iters[i]
 		if !iter.SeekFirst() {
+			mi.err = iter.Valid()
 			return false
 		}
 		mi.heap.Push(i)
@@ -276,8 +275,6 @@ func (mi *MergeIterator) Next() bool {
 
 func (mi *MergeIterator) Seek(ikey []byte) bool {
 
-	mi.heap.Clear()
-	mi.iterIdx = 0
 	if mi.err != nil {
 		return false
 	}
@@ -285,6 +282,8 @@ func (mi *MergeIterator) Seek(ikey []byte) bool {
 		mi.err = errors.ErrReleased
 		return false
 	}
+	mi.heap.Clear()
+	mi.iterIdx = 0
 	for i := range mi.iters {
 		if mi.iters[i].Seek(ikey) {
 			mi.heap.Push(i)
@@ -294,7 +293,7 @@ func (mi *MergeIterator) Seek(ikey []byte) bool {
 }
 
 func (mi *MergeIterator) Key() []byte {
-	return mi.ikey
+	return mi.key
 }
 
 func (mi *MergeIterator) Value() []byte {
@@ -310,8 +309,9 @@ func (mi *MergeIterator) next() bool {
 	}
 	mi.iterIdx = idx.(int)
 	iter := mi.iters[mi.iterIdx]
-	mi.ikey = iter.Key()
+	mi.key = iter.Key()
 	mi.value = iter.Value()
+
 	if iter.Next() {
 		mi.heap.Push(mi.iterIdx)
 		mi.keys[mi.iterIdx] = iter.Key()
@@ -321,8 +321,8 @@ func (mi *MergeIterator) next() bool {
 	return true
 }
 
-func (iter *MergeIterator) Valid() error {
-	return iter.err
+func (mi *MergeIterator) Valid() error {
+	return mi.err
 }
 
 func (mi *MergeIterator) minHeapLess(data []interface{}, i, j int) bool {

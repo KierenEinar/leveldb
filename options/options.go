@@ -50,6 +50,9 @@ type Options struct {
 	// hash32 used to lru cache hit slot, find and insert. set default fnv32
 	Hash32 hash.Hash32
 
+	// max manifest file bytes size, set default 64m
+	MaxManifestFileSize int64
+
 	// max open ldb file in cache, set default 1000
 	MaxOpenFiles uint32
 
@@ -70,4 +73,10 @@ type Options struct {
 
 	// VerifyCheckSum verify the ldb data block content check sum, set default true
 	VerifyCheckSum bool
+
+	// compaction input's overlapped with grand parent level table count, set default 10
+	GPOverlappedLimit int
+
+	// max compaction limit factor, set default 25
+	MaxCompactionLimitFactor uint32
 }

@@ -165,7 +165,7 @@ func (wb *WriteBatch) insertInto(memDb *MemDB) error {
 
 func (wb *WriteBatch) foreach(fn func(kt KeyType, ukey []byte, seq Sequence, value []byte) error) error {
 
-	pos := kWriteBatchHeaderSize
+	pos := options.KWriteBatchHeaderSize
 
 	for i := 0; i < wb.count; i++ {
 
@@ -179,14 +179,14 @@ func (wb *WriteBatch) foreach(fn func(kt KeyType, ukey []byte, seq Sequence, val
 		pos += m
 		ukey = wb.rep[m : m+int(keyLen)]
 
-		if keyType(kt) == keyTypeValue {
+		if KeyType(kt) == KeyTypeValue {
 			pos += int(keyLen)
 			valLen, m := binary.Uvarint(wb.rep[pos:])
 			pos += m
 			value = wb.rep[pos : pos+int(valLen)]
 		}
 
-		err := fn(keyType(kt), ukey, wb.seq+Sequence(i), value)
+		err := fn(KeyType(kt), ukey, wb.seq+Sequence(i), value)
 		if err != nil {
 			return err
 		}

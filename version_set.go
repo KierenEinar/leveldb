@@ -19,7 +19,7 @@ import (
 type VersionSet struct {
 	versions    *list.List
 	current     *Version
-	compactPtrs [options.KLevelNum]compactPtr
+	compactPtrs [options.KLevelNum]*compactPtr
 	cmp         comparer.Comparer
 
 	comparerName   []byte
@@ -28,10 +28,11 @@ type VersionSet struct {
 	stSeqNum       Sequence // current memtable start seq num
 	manifestFd     storage.Fd
 	manifestWriter *wal.JournalWriter
-
+	writer         storage.SequentialWriter
 	tableOperation *tableOperation
 	tableCache     *TableCache
-	storage        storage.Storage
+
+	opt *options.Options
 }
 
 type Version struct {
@@ -43,6 +44,9 @@ type Version struct {
 	// compaction
 	cScore float64
 	cLevel int
+
+	fileToCompact      *tFile
+	fileToCompactLevel int
 }
 
 func newVersion(vSet *VersionSet) *Version {
@@ -64,7 +68,7 @@ func newBuilder(vSet *VersionSet, base *Version) *vBuilder {
 		base: base,
 	}
 	for i := 0; i < options.KLevelNum; i++ {
-		builder.inserted[i] = newTFileSortedSet(vSet.cmp)
+		builder.inserted[i] = newTFileSortedSet(vSet.opt.InternalComparer)
 	}
 	for i := 0; i < options.KLevelNum; i++ {
 		builder.deleted[i] = newUintSortedSet()
@@ -109,7 +113,7 @@ func (builder *vBuilder) saveTo(v *Version) {
 		v.levels[level] = make(tFiles, 0, len(baseFile)+builder.inserted[level].size) // reverse pre alloc capacity
 		for iter.Next() {
 			tFile := decodeTFile(iter.Key())
-			pos := upperBound(baseFile, level, tFile, builder.vSet.cmp)
+			pos := upperBound(baseFile, level, tFile, builder.vSet.opt.InternalComparer)
 			for i := beginPos; i < pos; i++ {
 				builder.maybeAddFile(v, baseFile[i], level)
 			}
@@ -145,7 +149,7 @@ func (builder *vBuilder) maybeAddFile(v *Version, file tFile, level int) {
 	}
 
 	files := v.levels[level]
-	cmp := builder.vSet.cmp
+	cmp := builder.vSet.opt.InternalComparer
 	if level > 0 && len(files) > 0 {
 		utils.Assert(cmp.Compare(files[len(files)-1].iMax, file.iMin) < 0)
 	}
@@ -228,11 +232,11 @@ type tFileSortedSet struct {
 	*anySortedSet
 }
 
-func newTFileSortedSet(iComparer *iComparer) *tFileSortedSet {
+func newTFileSortedSet(cmp comparer.Comparer) *tFileSortedSet {
 	tSet := &tFileSortedSet{
 		anySortedSet: &anySortedSet{
 			BTree: collections.InitBTree(3, &tFileComparer{
-				iComparer: iComparer,
+				iComparer: cmp,
 			}),
 			anySortedSetEncodeKey: encodeTFileToBinary,
 		},
@@ -241,7 +245,7 @@ func newTFileSortedSet(iComparer *iComparer) *tFileSortedSet {
 }
 
 type tFileComparer struct {
-	*iComparer
+	iComparer comparer.Comparer
 }
 
 func (tc *tFileComparer) Compare(a, b []byte) int {
@@ -367,11 +371,9 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 	builder.saveTo(v)
 	finalize(v)
 
-	mutex.Unlock() // cause compaction is run in single thread, so we can avoid expensive write syscall
-
 	var (
+		stor           = vSet.opt.Storage
 		writer         storage.SequentialWriter
-		storage        = vSet.storage
 		manifestWriter = vSet.manifestWriter
 		manifestFd     = vSet.manifestFd
 		newManifest    bool
@@ -382,44 +384,56 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 		newManifest = true
 	}
 
-	if manifestWriter != nil && manifestWriter.size() >= kManifestSizeThreshold {
+	if manifestWriter != nil && manifestWriter.FileSize() >= vSet.opt.MaxManifestFileSize {
 		newManifest = true
-		manifestFd = Fd{
-			FileType: KJournalFile,
+		manifestFd = storage.Fd{
+			FileType: storage.KDescriptorFile,
 			Num:      vSet.allocFileNum(),
 		}
 	}
 
 	if newManifest {
-		writer, err = storage.Create(manifestFd)
+		writer, err = stor.NewAppendableFile(manifestFd)
 		if err == nil {
-			manifestWriter = NewJournalWriter(writer)
+			manifestWriter = wal.NewJournalWriter(writer)
 			err = vSet.writeSnapShot(manifestWriter) // write current version snapshot into manifest
 		}
 	}
+
+	mutex.Unlock() // cause compaction is run in single thread, so we can avoid expensive write syscall
+
+	utils.Assert(manifestWriter != nil, "manifest writer must not nil")
 
 	if err == nil {
 		edit.EncodeTo(manifestWriter)
 		err = edit.err
 	}
 
-	if err == nil {
-		err = storage.SetCurrent(manifestFd.Num)
+	if err == nil && manifestWriter != nil { // make compiler happy
+		err = manifestWriter.Sync()
+	}
+
+	if err == nil && newManifest {
+		err = stor.SetCurrent(manifestFd.Num)
 		if err == nil {
-			vSet.manifestFd = manifestFd
-			vSet.manifestWriter = manifestWriter
+			_ = vSet.writer.Close()
 		}
 	}
 
 	mutex.Lock()
 
 	if err == nil {
+		if newManifest {
+			vSet.manifestWriter = manifestWriter
+			vSet.writer = writer
+		}
 		vSet.appendVersion(v)
 		vSet.stSeqNum = edit.lastSeq
 		vSet.stJournalNum = edit.journalNum
 	} else {
-		if newManifest {
-			err = storage.Remove(manifestFd)
+		if newManifest && writer != vSet.writer {
+			_ = writer.Close()
+			_ = stor.Remove(manifestFd)
 		}
 	}
 
@@ -439,6 +453,29 @@ func (vSet *VersionSet) appendVersion(v *Version) {
 	vSet.current.Ref()
 }
 
+func (vSet *VersionSet) writeSnapShot(w io.Writer) error {
+
+	var edit VersionEdit
+
+	for _, cPtr := range vSet.compactPtrs {
+		edit.addCompactPtr(cPtr.level, cPtr.ikey)
+	}
+
+	for level, fileMetas := range vSet.current.levels {
+		for _, fileMeta := range fileMetas {
+			edit.addNewTable(level, fileMeta.size, uint64(fileMeta.fd), fileMeta.iMin, fileMeta.iMax)
+		}
+	}
+
+	edit.setNextFile(vSet.nextFileNum)
+	edit.setLogNum(vSet.stJournalNum)
+	edit.setLastSeq(vSet.stSeqNum)
+	edit.setCompareName(vSet.opt.InternalComparer.Name())
+
+	edit.EncodeTo(w)
+	return edit.err
+}
+
 func finalize(v *Version) {
 
 	var (
@@ -446,7 +483,7 @@ func finalize(v *Version) {
 		bestScore float64
 	)
 
-	for level := 0; level < len(v.levels); level++ {
+	for level := 0; level < len(v.levels)-1; level++ {
 		if level == 0 {
 			length := len(v.levels[level])
 			bestScore = float64(length) / options.KLevel0StopWriteTrigger
@@ -476,13 +513,12 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 
 	var (
 		hasComparerName, hasLogFileNum, hasNextFileNum, hasLastSeq bool
-		comparerName                                               []byte
 		logFileNum                                                 uint64
 		seqNum                                                     Sequence
 		nextFileNum                                                uint64
 	)
 
-	reader, rErr := vSet.storage.NewSequentialReader(manifest)
+	reader, rErr := vSet.opt.Storage.NewSequentialReader(manifest)
 	if rErr != nil {
 		err = rErr
 		return
@@ -516,11 +552,10 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 
 		if edit.hasRec(kComparerName) {
 			hasComparerName = true
-			if bytes.Compare(edit.comparerName, vSet.cmp.Name()) != 0 {
+			if bytes.Compare(edit.comparerName, vSet.opt.InternalComparer.Name()) != 0 {
 				err = errors.NewErrCorruption("invalid comparator")
 				return
 			}
-			comparerName = edit.comparerName
 		}
 
 		if edit.hasRec(kNextFileNum) {
@@ -575,7 +610,6 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	vSet.nextFileNum = nextFileNum + 1
 	vSet.stSeqNum = seqNum
 	vSet.stJournalNum = logFileNum
-	vSet.comparerName = comparerName
 	return
 }
 
@@ -732,4 +766,21 @@ func (vSet *VersionSet) loadCompactPtr(level int) InternalKey {
 		return nil
 	}
 	return vSet.compactPtrs[level].ikey
+}
+
+func (vSet *VersionSet) needCompaction() bool {
+
+	current := vSet.current
+	current.Ref()
+	defer current.UnRef()
+
+	if current.cScore >= 1.0 {
+		return true
+	}
+
+	if current.fileToCompact != nil {
+		return true
+	}
+
+	return false
 }

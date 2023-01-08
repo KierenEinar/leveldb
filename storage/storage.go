@@ -52,7 +52,7 @@ type Locker interface {
 type Storage interface {
 
 	// Lock using file system lock to lock
-	//Lock(fd Fd) (Locker, error)
+	// Lock(fd Fd) (Locker, error)
 
 	NewAppendableFile(fd Fd) (SequentialWriter, error)
 
@@ -75,6 +75,8 @@ type Storage interface {
 	List() ([]Fd, error)
 
 	RemoveDir(dir string) error
+
+	FileSize(fd Fd) (int64, error)
 
 	Close() error
 }
@@ -481,6 +483,30 @@ func (fs *FileStorage) RemoveDir(dir string) (err error) {
 	}
 
 	return os.RemoveAll(filePath)
+}
+
+func (fs *FileStorage) FileSize(fd Fd) (int64, error) {
+	filePath := path.Join(fs.dbPath, fd.String())
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	if info.IsDir() {
+		return 0, &os.PathError{
+			Op:   "FileSize",
+			Path: filePath,
+			Err:  fmt.Errorf("get file size err, is dir"),
+		}
+	}
+
+	return info.Size(), nil
+
 }
 
 func (fs *FileStorage) ref() (err error) {

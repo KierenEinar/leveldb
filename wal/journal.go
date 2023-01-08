@@ -158,6 +158,10 @@ func (jw *JournalWriter) Sync() error {
 	return jw.w.Sync()
 }
 
+func (jw *JournalWriter) FileSize() int64 {
+	return 0
+}
+
 // JournalReader journal reader
 // usage:
 //	jr := JournalReader{}

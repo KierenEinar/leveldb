@@ -2,6 +2,8 @@ package leveldb
 
 import (
 	"bytes"
+	"leveldb/comparer"
+	"leveldb/errors"
 	"leveldb/iterator"
 	"leveldb/options"
 	"leveldb/storage"
@@ -153,14 +155,6 @@ func (tableOperation *tableOperation) open(f tFile) (*TableReader, error) {
 	return NewTableReader(reader, f.Size)
 }
 
-func (tableOperation *tableOperation) newIterator(f tFile) (iterator.Iterator, error) {
-	tr, err := tableOperation.open(f)
-	if err != nil {
-		return nil, err
-	}
-	return tr.NewIterator()
-}
-
 func (tableOperation *tableOperation) create(tableCache *TableCache, fileMeta tFile) (*tWriter, error) {
 	w, err := tableOperation.opt.Storage.NewWritableFile(storage.Fd{
 		FileType: storage.KTableFile,
@@ -228,26 +222,34 @@ func (t *tWriter) size() int {
 
 type tFileArrIteratorIndexer struct {
 	*utils.BasicReleaser
-	err       error
-	tFiles    tFiles
-	tableIter Iterator
-	index     int
-	len       int
+	err        error
+	tFiles     tFiles
+	tableIter  iterator.Iterator
+	tableCache *TableCache
+	cmp        comparer.Comparer
+	index      int
+	len        int
 }
 
-func newTFileArrIteratorIndexer(tFiles tFiles) iteratorIndexer {
+func (indexer *tFileArrIteratorIndexer) cleanUp(args ...interface{}) {
+	if indexer.tableIter != nil {
+		indexer.tableIter.UnRef()
+	}
+	indexer.len = 0
+	indexer.tFiles = nil
+	indexer.index = 0
+}
+
+func newTFileArrIteratorIndexer(tFiles tFiles, cmp comparer.Comparer) iterator.IteratorIndexer {
 	indexer := &tFileArrIteratorIndexer{
-		tFiles: tFiles,
-		index:  0,
-		len:    len(tFiles),
+		tFiles:        tFiles,
+		index:         0,
+		len:           len(tFiles),
+		cmp:           cmp,
+		BasicReleaser: &utils.BasicReleaser{},
 	}
-	indexer.OnClose = func() {
-		if indexer.tableIter != nil {
-			indexer.tableIter.UnRef()
-		}
-		indexer.index = 0
-		indexer.tFiles = indexer.tFiles[:0]
-	}
+	indexer.RegisterCleanUp(indexer.cleanUp)
+	indexer.Ref()
 	return indexer
 }
 
@@ -256,14 +258,14 @@ func (indexer *tFileArrIteratorIndexer) Next() bool {
 	if indexer.err != nil {
 		return false
 	}
-	if indexer.released() {
-		indexer.err = ErrReleased
+	if indexer.Released() {
+		indexer.err = errors.ErrReleased
 		return false
 	}
 
-	if indexer.index <= indexer.len-1 {
+	if indexer.index < indexer.len {
 		tFile := indexer.tFiles[indexer.index]
-		tr, err := NewTableReader(nil, tFile.Size)
+		iter, err := indexer.tableCache.NewIterator(tFile)
 		if err != nil {
 			indexer.err = err
 			return false
@@ -271,10 +273,7 @@ func (indexer *tFileArrIteratorIndexer) Next() bool {
 		if indexer.tableIter != nil {
 			indexer.tableIter.UnRef()
 		}
-		indexer.tableIter, indexer.err = tr.NewIterator()
-		if indexer.err != nil {
-			return false
-		}
+		indexer.tableIter = iter
 		indexer.index++
 		return true
 	}
@@ -287,27 +286,37 @@ func (indexer *tFileArrIteratorIndexer) SeekFirst() bool {
 	if indexer.err != nil {
 		return false
 	}
-	if indexer.released() {
-		indexer.err = ErrReleased
+	if indexer.Released() {
+		indexer.err = errors.ErrReleased
 		return false
 	}
 	indexer.index = 0
+	if indexer.tableIter != nil {
+		indexer.tableIter.UnRef()
+		indexer.tableIter = nil
+	}
+
 	return indexer.Next()
 }
 
-func (indexer *tFileArrIteratorIndexer) Seek(ikey InternalKey) bool {
+func (indexer *tFileArrIteratorIndexer) Seek(key []byte) bool {
 
 	if indexer.err != nil {
 		return false
 	}
-	if indexer.released() {
-		indexer.err = ErrReleased
+	if indexer.Released() {
+		indexer.err = errors.ErrReleased
 		return false
 	}
 
+	if indexer.tableIter != nil {
+		indexer.tableIter.UnRef()
+		indexer.index = 0
+	}
+
 	n := sort.Search(indexer.len, func(i int) bool {
-		r := indexer.tFiles[i].iMax.compare(ikey)
-		return r >= 0
+		tFile := indexer.tFiles[i]
+		return indexer.cmp.Compare(tFile.iMax, key) >= 0
 	})
 
 	if n == indexer.len {
@@ -315,10 +324,11 @@ func (indexer *tFileArrIteratorIndexer) Seek(ikey InternalKey) bool {
 	}
 
 	indexer.index = n
-	return indexer.Next()
+	indexer.tableIter, indexer.err = indexer.tableCache.NewIterator(indexer.tFiles[n])
+	return indexer.err == nil
 }
 
-func (indexer *tFileArrIteratorIndexer) Get() Iterator {
+func (indexer *tFileArrIteratorIndexer) Get() iterator.Iterator {
 	return indexer.tableIter
 }
 
