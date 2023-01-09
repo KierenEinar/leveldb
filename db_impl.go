@@ -369,7 +369,7 @@ func (dbImpl *DBImpl) MaybeScheduleCompaction() {
 		// do nothing
 	} else {
 		dbImpl.backgroundCompactionScheduled = true
-		go dbImpl.backgroundCall()
+		dbImpl.scheduler.enqueue(dbImpl.backgroundCall)
 	}
 
 }
@@ -469,7 +469,7 @@ func (dbImpl *DBImpl) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err err
 		}
 	}()
 
-	tWriter, err := dbImpl.tableOperation.create(dbImpl.tableCache, fileMeta)
+	tWriter, err := dbImpl.tableOperation.create(fileMeta)
 	if err != nil {
 		return err
 	}
@@ -761,7 +761,7 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	db := &DBImpl{
 		versionSet: &VersionSet{
 			versions:    list.New(),
-			compactPtrs: [7]compactPtr{},
+			compactPtrs: [7]*compactPtr{},
 			tableCache:  newTableCache(opt),
 			opt:         opt,
 		},
@@ -773,6 +773,6 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	}
 
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
-	db.tableOperation = newTableOperation(opt)
+	db.tableOperation = newTableOperation(opt, db.tableCache)
 	return db
 }

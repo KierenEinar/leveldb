@@ -132,30 +132,19 @@ func (s tFiles) getOverlapped(imin InternalKey, imax InternalKey, overlapped boo
 	return
 }
 
-// todo finish it
-func (vSet *VersionSet) createNewTable(fd Fd, fileSize int) (*TableWriter, error) {
-	return nil, nil
-}
-
 type tableOperation struct {
-	opt *options.Options
+	opt        *options.Options
+	tableCache *TableCache
 }
 
-func newTableOperation(opt *options.Options) *tableOperation {
+func newTableOperation(opt *options.Options, tableCache *TableCache) *tableOperation {
 	return &tableOperation{
-		opt: opt,
+		opt:        opt,
+		tableCache: tableCache,
 	}
 }
 
-func (tableOperation *tableOperation) open(f tFile) (*TableReader, error) {
-	reader, err := tableOperation.storage.Open(f.fd)
-	if err != nil {
-		return nil, err
-	}
-	return NewTableReader(reader, f.Size)
-}
-
-func (tableOperation *tableOperation) create(tableCache *TableCache, fileMeta tFile) (*tWriter, error) {
+func (tableOperation *tableOperation) create(fileMeta tFile) (*tWriter, error) {
 	w, err := tableOperation.opt.Storage.NewWritableFile(storage.Fd{
 		FileType: storage.KTableFile,
 		Num:      uint64(fileMeta.fd),
@@ -166,7 +155,7 @@ func (tableOperation *tableOperation) create(tableCache *TableCache, fileMeta tF
 	return &tWriter{
 		w:          w,
 		fileMeta:   fileMeta,
-		tableCache: tableCache,
+		tableCache: tableOperation.tableCache,
 		tw:         table.NewWriter(w, tableOperation.opt.FilterPolicy, tableOperation.opt.InternalComparer),
 	}, nil
 }
@@ -207,12 +196,12 @@ func (t *tWriter) finish() error {
 	iter, err := t.tableCache.NewIterator(t.fileMeta)
 	if err == nil {
 		iter.UnRef()
+		t.fileMeta.iMax = t.last
+		t.fileMeta.iMin = t.first
+		t.fileMeta.size = t.size()
 	}
 
-	t.fileMeta.iMax = t.last
-	t.fileMeta.iMin = t.first
-	t.fileMeta.size = t.size()
-	return nil
+	return err
 
 }
 

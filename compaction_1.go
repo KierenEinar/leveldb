@@ -210,19 +210,21 @@ func (tFiles tFiles) getRange1(cmp comparer.Comparer) (imin, imax InternalKey) {
 
 func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 
+	utils.AssertMutexHeld(&dbImpl.rwMutex)
+
 	if dbImpl.snapshots.Len() == 0 {
 		c.minSeq = dbImpl.seqNum
 	} else {
 		c.minSeq = dbImpl.snapshots.Front().Value.(Sequence)
 	}
 
+	dbImpl.rwMutex.Unlock()
+
 	iter, iterErr := c.makeInputIterator()
 	if iterErr != nil {
 		return iterErr
 	}
 	defer iter.UnRef()
-
-	db.rwMutex.Unlock()
 
 	var (
 		drop     bool
@@ -231,13 +233,13 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 		lastSeq  Sequence
 	)
 
-	for iter.Next() && iter.Valid() == nil && atomic.LoadUint32(&db.shutdown) == 0 {
+	for iter.Next() && iter.Valid() == nil && atomic.LoadUint32(&dbImpl.shutdown) == 0 {
 
-		if atomic.LoadUint32(&db.hasImm) == 1 {
-			db.rwMutex.Lock()
-			db.compactMemTable()
-			db.backgroundWorkFinishedSignal.Broadcast()
-			db.rwMutex.Unlock()
+		if atomic.LoadUint32(&dbImpl.hasImm) == 1 {
+			dbImpl.rwMutex.Lock()
+			dbImpl.compactMemTable()
+			dbImpl.backgroundWorkFinishedSignal.Broadcast()
+			dbImpl.rwMutex.Unlock()
 		}
 
 		inputKey := iter.Key()
@@ -245,7 +247,7 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 		// if current file input key will expand the overlapped with grand parent,
 		// it need to finish current table and create a new one
 		if c.tWriter != nil && c.shouldStopBefore(inputKey) {
-			if err = db.finishCompactionOutputFile(c); err != nil {
+			if err = dbImpl.finishCompactionOutputFile(c); err != nil {
 				break
 			}
 		}
@@ -253,19 +255,19 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 		uk, kt, seq, parseErr := parseInternalKey(inputKey)
 
 		if parseErr != nil {
-			lastIKey = append([]byte(nil), inputKey...)
+			lastIKey = inputKey
 			drop = false
 		} else {
 			// ukey first occur
-			if lastIKey == nil || bytes.Compare(lastIKey.ukey(), uk) != 0 {
+			if lastIKey == nil || bytes.Compare(lastIKey.UserKey(), uk) != 0 {
 				lastSeq = Sequence(kMaxSequenceNum)
-				lastIKey = append([]byte(nil), inputKey...)
+				lastIKey = inputKey
 			}
 			if lastSeq > c.minSeq {
 				drop = false
-				if kt == keyTypeValue {
+				if kt == KeyTypeValue {
 
-				} else if kt == keyTypeDel && Sequence(seq) < c.minSeq && c.isBaseLevelForKey(inputKey) {
+				} else if kt == KeyTypeDel && Sequence(seq) < c.minSeq && c.isBaseLevelForKey(inputKey) {
 					drop = true
 				}
 			} else {
@@ -278,31 +280,49 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 			continue
 		}
 
-		if c.tWriter != nil && c.tWriter.size() > defaultCompactionTableSize {
-			if err = db.finishCompactionOutputFile(c); err != nil {
+		if c.tWriter != nil && c.tWriter.size() > int(c.opt.MaxEstimateFileSize) {
+			if err = dbImpl.finishCompactionOutputFile(c); err != nil {
 				break
 			}
 		}
 
 		if c.tWriter == nil {
-			if c.tWriter, err = c.tableOperation.create(); err != nil {
+			dbImpl.rwMutex.Lock()
+			nextFd := dbImpl.versionSet.allocFileNum()
+			dbImpl.rwMutex.Unlock()
+			fileMeta := tFile{
+				fd: int(nextFd),
+			}
+			if c.tWriter, err = c.tableOperation.create(fileMeta); err != nil {
+				dbImpl.rwMutex.Lock()
+				dbImpl.versionSet.reuseFileNum(nextFd)
+				dbImpl.rwMutex.Unlock()
 				break
 			}
 		}
 
 		if err = c.tWriter.append(inputKey, value); err != nil {
+			dbImpl.rwMutex.Lock()
+			dbImpl.versionSet.reuseFileNum(uint64(c.tWriter.fileMeta.fd))
+			dbImpl.rwMutex.Unlock()
 			break
 		}
 	}
 
 	if c.tWriter != nil {
-		err = db.finishCompactionOutputFile(c)
+		err = dbImpl.finishCompactionOutputFile(c)
 	}
 
-	db.rwMutex.Lock()
+	dbImpl.rwMutex.Lock()
 
 	if err == nil {
-		err = db.VersionSet.logAndApply(&c.edit, &db.rwMutex)
+		for _, input := range c.inputs {
+			for which, table := range input {
+				c.edit.addDelTable(which+c.sourceLevel, uint64(table.fd))
+			}
+		}
+
+		err = dbImpl.versionSet.logAndApply(&c.edit, &dbImpl.rwMutex)
 	}
 
 	return err
@@ -312,6 +332,14 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 func (c *compaction1) makeInputIterator() (iter iterator.Iterator, err error) {
 
 	iters := make([]iterator.Iterator, 0)
+
+	defer func() {
+		if err != nil {
+			for _, iter := range iters {
+				iter.UnRef()
+			}
+		}
+	}()
 
 	for which, inputs := range c.inputs {
 		if c.sourceLevel+which == 0 {
@@ -332,30 +360,11 @@ func (c *compaction1) makeInputIterator() (iter iterator.Iterator, err error) {
 	return
 }
 
-func (vSet *VersionSet) newTableIterator(tFile tFile) (Iterator, error) {
-
-	reader, err := vSet.opt.Storage.Open(tFile.fd)
-	if err != nil {
-		return nil, err
-	}
-	tr, err := NewTableReader(reader, tFile.Size)
-	if err != nil {
-		return nil, err
-	}
-
-	iter, err := tr.NewIterator()
-	if err != nil {
-		return nil, err
-	}
-
-	return iter, nil
-}
-
 func (c *compaction1) shouldStopBefore(nextKey InternalKey) bool {
 
 	for c.inputOverlappedGPIndex < len(c.gp) {
-		if c.cmp.Compare(nextKey, c.gp[c.inputOverlappedGPIndex].iMax) > 0 {
-			c.gpOverlappedBytes += c.gp[c.inputOverlappedGPIndex].Size
+		if c.opt.InternalComparer.Compare(nextKey, c.gp[c.inputOverlappedGPIndex].iMax) > 0 {
+			c.gpOverlappedBytes += c.gp[c.inputOverlappedGPIndex].size
 			c.inputOverlappedGPIndex++
 			if c.gpOverlappedBytes > c.gpOverlappedLimit {
 				c.gpOverlappedBytes = 0
@@ -368,27 +377,28 @@ func (c *compaction1) shouldStopBefore(nextKey InternalKey) bool {
 	return false
 }
 
-func (db *DB) finishCompactionOutputFile(c *compaction1) error {
-	assert(c.tWriter != nil)
+func (dbImpl *DBImpl) finishCompactionOutputFile(c *compaction1) error {
+	utils.Assert(c.tWriter != nil)
 
-	tFile, err := c.tWriter.finish()
+	err := c.tWriter.finish()
 	if err != nil {
 		return err
 	}
-	c.edit.addNewTable(c.cPtr.level+1, tFile.Size, tFile.fd.Num, tFile.iMin, tFile.iMax)
+	fileMeta := c.tWriter.fileMeta
+	c.edit.addNewTable(c.sourceLevel+1, fileMeta.size, uint64(fileMeta.fd), fileMeta.iMin, fileMeta.iMax)
 	c.tWriter = nil
 	return nil
 }
 
 func (c *compaction1) isBaseLevelForKey(input InternalKey) bool {
-	for levelI := c.cPtr.level + 2; levelI < len(c.levels); levelI++ {
+	for levelI := c.sourceLevel + 2; levelI < len(c.levels); levelI++ {
 		level := c.levels[levelI]
 
 		for c.baseLevelI[levelI] < len(level) {
 			table := level[c.baseLevelI[levelI]]
-			if bytes.Compare(input.ukey(), table.iMax.ukey()) > 0 {
+			if bytes.Compare(input.UserKey(), table.iMax.UserKey()) > 0 {
 				c.baseLevelI[levelI]++
-			} else if bytes.Compare(input.ukey(), table.iMin.ukey()) < 0 {
+			} else if bytes.Compare(input.UserKey(), table.iMin.UserKey()) < 0 {
 				break
 			} else {
 				return false
