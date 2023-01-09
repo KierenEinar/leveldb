@@ -19,7 +19,7 @@ import (
 type VersionSet struct {
 	versions    *list.List
 	current     *Version
-	compactPtrs [options.KLevelNum]*compactPtr
+	compactPtrs [options.KLevelNum]compactPtr
 	cmp         comparer.Comparer
 
 	comparerName   []byte
@@ -617,13 +617,13 @@ func (vSet *VersionSet) getCurrent() *Version {
 	return vSet.current
 }
 
-func (vSet *VersionSet) addLiveFiles(expected map[Fd]struct{}) {
+func (vSet *VersionSet) addLiveFiles(expected map[uint64]struct{}) {
 	ele := vSet.versions.Front()
 	for ele != nil {
 		ver := ele.Value.(*Version)
 		for _, level := range ver.levels {
 			for _, v := range level {
-				expected[v.fd] = struct{}{}
+				expected[uint64(v.fd)] = struct{}{}
 			}
 		}
 		ele = ele.Next()
@@ -710,14 +710,14 @@ func (v *Version) get(ikey InternalKey, value *[]byte) (err error) {
 
 func (v *Version) foreachOverlapping(ikey InternalKey, f func(level int, tFile tFile) bool) {
 	tmp := make([]tFile, 0)
-	ukey := ikey.ukey()
+	ukey := ikey.UserKey()
 	for _, level0 := range v.levels[0] {
-		if bytes.Compare(level0.iMin.ukey(), ukey) <= 0 && bytes.Compare(level0.iMax.ukey(), ukey) >= 0 {
+		if bytes.Compare(level0.iMin.UserKey(), ukey) <= 0 && bytes.Compare(level0.iMax.UserKey(), ukey) >= 0 {
 			tmp = append(tmp, level0)
 		}
 	}
 	sort.Slice(tmp, func(i, j int) bool {
-		return tmp[i].fd.Num > tmp[j].fd.Num
+		return tmp[i].fd > tmp[j].fd
 	})
 
 	for idx := 0; idx < len(tmp); idx++ {
@@ -729,9 +729,9 @@ func (v *Version) foreachOverlapping(ikey InternalKey, f func(level int, tFile t
 	for level := 1; level < len(v.levels); level++ {
 		lf := v.levels[level]
 		idx := sort.Search(len(lf), func(i int) bool {
-			return bytes.Compare(lf[i].iMax.ukey(), ukey) >= 0
+			return bytes.Compare(lf[i].iMax.UserKey(), ukey) >= 0
 		})
-		if idx < len(lf) && bytes.Compare(lf[idx].iMin.ukey(), ukey) <= 0 {
+		if idx < len(lf) && bytes.Compare(lf[idx].iMin.UserKey(), ukey) <= 0 {
 			if !f(level, lf[idx]) {
 				return
 			}

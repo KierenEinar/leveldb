@@ -23,7 +23,7 @@ type DBImpl struct {
 	journalWriter *wal.JournalWriter
 
 	shutdown uint32
-
+	closed   chan struct{}
 	// these state are protect by mutex
 	seqNum    Sequence
 	journalFd storage.Fd
@@ -51,11 +51,15 @@ type DBImpl struct {
 	tableCache     *TableCache
 	snapshots      *list.List
 
+	scheduler *Scheduler
+
 	opt *options.Options
 }
 
 func (dbImpl *DBImpl) Put(key []byte, value []byte) error {
-
+	wb := NewWriteBatch()
+	wb.Put(key, value)
+	return dbImpl.write(wb)
 }
 
 func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
@@ -369,9 +373,14 @@ func (dbImpl *DBImpl) MaybeScheduleCompaction() {
 		// do nothing
 	} else {
 		dbImpl.backgroundCompactionScheduled = true
-		dbImpl.scheduler.enqueue(dbImpl.backgroundCall)
+		dbImpl.scheduler.Enqueue(bgWork, dbImpl)
 	}
 
+}
+
+func bgWork(args ...interface{}) {
+	dbImpl := args[0].(*DBImpl)
+	dbImpl.backgroundCall()
 }
 
 func (dbImpl *DBImpl) backgroundCall() {
@@ -710,7 +719,7 @@ func (dbImpl *DBImpl) removeObsoleteFiles() (err error) {
 		return
 	}
 
-	liveTableFileSet := make(map[storage.Fd]struct{})
+	liveTableFileSet := make(map[uint64]struct{})
 	dbImpl.versionSet.addLiveFiles(liveTableFileSet)
 
 	fileToClean := make([]storage.Fd, 0)
@@ -723,7 +732,7 @@ func (dbImpl *DBImpl) removeObsoleteFiles() (err error) {
 		case storage.KJournalFile:
 			keep = fd.Num >= dbImpl.versionSet.stJournalNum
 		case storage.KTableFile:
-			if _, ok := liveTableFileSet[fd]; ok {
+			if _, ok := liveTableFileSet[fd.Num]; ok {
 				keep = true
 			}
 		case storage.KCurrentFile, storage.KDBLockFile, storage.KDBTempFile:
@@ -761,7 +770,7 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	db := &DBImpl{
 		versionSet: &VersionSet{
 			versions:    list.New(),
-			compactPtrs: [7]*compactPtr{},
+			compactPtrs: [7]compactPtr{},
 			tableCache:  newTableCache(opt),
 			opt:         opt,
 		},
@@ -770,9 +779,11 @@ func newDBImpl(opt *options.Options) *DBImpl {
 		tableCache: newTableCache(opt),
 		snapshots:  list.New(),
 		opt:        opt,
+		closed:     make(chan struct{}),
 	}
 
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.tableOperation = newTableOperation(opt, db.tableCache)
+	db.scheduler = NewSchedule(db.closed)
 	return db
 }
