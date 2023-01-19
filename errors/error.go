@@ -27,4 +27,6 @@ var (
 	ErrFileIsDir                = errors.New("leveldb/path is dir")
 	ErrKeyDel                   = errors.New("leveldb/memdb key deleted")
 	ErrMissingCurrent           = errors.New("leveldb/open missing current, set CreateIfMissingCurrent true fix it")
+	ErrLocked                   = errors.New("leveldb/storage file has been locked")
+	ErrNotLocked                = errors.New("leveldb/storage file not locked")
 )

@@ -11,7 +11,6 @@ import (
 
 const (
 	kMaxHeight = 12
-	p          = 1 / 4
 	kBranching = 4
 )
 
@@ -29,7 +28,7 @@ type SkipList struct {
 	updatesScratch [kMaxHeight]*skipListNode
 
 	comparer.BasicComparer
-	RWMutex sync.RWMutex
+	rwMutex sync.RWMutex
 }
 
 func NewSkipList(seed int64, capacity int, cmp comparer.BasicComparer) *SkipList {
@@ -48,8 +47,8 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 		err = errors.ErrReleased
 		return
 	}
-	skl.RWMutex.Lock()
-	defer skl.RWMutex.Unlock()
+	skl.rwMutex.Lock()
+	defer skl.rwMutex.Unlock()
 	n := skl.dummyHead
 	for i := skl.level - 1; i >= 0; i-- {
 		for n.next(i) != nil && skl.Compare(n.next(i).Key(skl.kvData), key) < 0 {
@@ -58,7 +57,7 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 		skl.updatesScratch[i] = n
 	}
 
-	updates := skl.updatesScratch[:skl.level]
+	updates := skl.updatesScratch
 
 	// if Key exists, just update the Value
 	if updates[0] != nil && skl.Compare(updates[0].next(0).Key(skl.kvData), key) == 0 {
@@ -69,7 +68,6 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 		if replaceNode.valLen >= len(value) {
 			nodeKvData := skl.kvData[replaceNode.kvOffset+replaceNode.keyLen : replaceNode.kvOffset+replaceNode.keyLen+replaceNode.valLen]
 			m := copy(nodeKvData[:], value)
-			skl.kvSize += replaceNode.valLen - m
 			replaceNode.valLen = m
 			return
 		}
@@ -77,7 +75,7 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 		replaceNode.kvOffset = len(skl.kvData)
 		skl.kvData = append(skl.kvData, key...)
 		skl.kvData = append(skl.kvData, value...)
-		skl.kvSize += len(value) - replaceNode.valLen
+		skl.kvSize += len(key) + len(value)
 		replaceNode.valLen = len(value)
 		return
 	}
@@ -101,8 +99,8 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 		},
 	}
 
-	for l := 0; l < len(updates); l++ {
-		updates[l].setNext(int8(l), newNode)
+	for l := int8(0); l < level; l++ {
+		updates[l].setNext(l, newNode)
 	}
 
 	// update forward
@@ -133,8 +131,8 @@ func (skl *SkipList) Del(key []byte) (updated bool, err error) {
 		return
 	}
 
-	skl.RWMutex.Lock()
-	defer skl.RWMutex.Unlock()
+	skl.rwMutex.Lock()
+	defer skl.rwMutex.Unlock()
 
 	if skl.tail == nil || skl.dummyHead.next(0) == nil {
 		updated = false
@@ -192,8 +190,8 @@ func (skl *SkipList) FindGreaterOrEqual(key []byte) (*skipListNode, bool, error)
 		return nil, false, errors.ErrReleased
 	}
 
-	skl.RWMutex.RLock()
-	defer skl.RWMutex.RUnlock()
+	skl.rwMutex.RLock()
+	defer skl.rwMutex.RUnlock()
 	n := skl.dummyHead
 	var (
 		hitLevel int8 = -1
@@ -217,14 +215,14 @@ func (skl *SkipList) FindGreaterOrEqual(key []byte) (*skipListNode, bool, error)
 }
 
 func (skl *SkipList) Size() int {
-	skl.RWMutex.RLock()
-	defer skl.RWMutex.RUnlock()
+	skl.rwMutex.RLock()
+	defer skl.rwMutex.RUnlock()
 	return skl.kvSize
 }
 
 func (skl *SkipList) Capacity() int {
-	skl.RWMutex.RLock()
-	defer skl.RWMutex.RUnlock()
+	skl.rwMutex.RLock()
+	defer skl.rwMutex.RUnlock()
 	return cap(skl.kvData)
 }
 
@@ -270,8 +268,8 @@ func (sklIter *SkipListIter) Next() bool {
 		return false
 	}
 	skl := sklIter.skl
-	skl.RWMutex.RLock()
-	defer skl.RWMutex.RUnlock()
+	skl.rwMutex.RLock()
+	defer skl.rwMutex.RUnlock()
 
 	if sklIter.n == nil {
 		return sklIter.SeekFirst()
@@ -306,8 +304,8 @@ func (sklIter *SkipListIter) Seek(key []byte) bool {
 
 	skl := sklIter.skl
 
-	sklIter.skl.RWMutex.RLock()
-	defer sklIter.skl.RWMutex.RUnlock()
+	sklIter.skl.rwMutex.RLock()
+	defer sklIter.skl.rwMutex.RUnlock()
 
 	node, _, err := skl.FindGreaterOrEqual(key)
 	if err != nil {

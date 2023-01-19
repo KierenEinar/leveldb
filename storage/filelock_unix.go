@@ -13,9 +13,13 @@ type UnixFileLock struct {
 	*os.File
 }
 
-func (fileLock *UnixFileLock) Release() {
+func (fileLock *UnixFileLock) release() {
 	setFileLock(fileLock.File, false)
 	_ = fileLock.File.Close()
+}
+
+func (fileLock *UnixFileLock) name() string {
+	return fileLock.Name()
 }
 
 func lockFile(path string) (FileLock, error) {

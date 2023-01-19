@@ -336,7 +336,7 @@ func (reader *Reader) readBlock(bh blockHandle) (content blockContent, err error
 	compressType := data[blockContentLen]
 	checkSum := binary.LittleEndian.Uint32(data[blockContentLen+1:])
 
-	if reader.opt.VerifyCheckSum {
+	if !reader.opt.NoVerifyCheckSum {
 		if crc32.ChecksumIEEE(data[:blockContentLen]) != checkSum {
 			utils.PoolPutBytes(scratch)
 			err = errors.NewErrCorruption("invalid checksum")

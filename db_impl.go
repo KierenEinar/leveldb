@@ -3,7 +3,10 @@ package leveldb
 import (
 	"container/list"
 	"encoding/binary"
+	"fmt"
+	"hash/fnv"
 	"io"
+	"leveldb/cache"
 	"leveldb/errors"
 	"leveldb/options"
 	"leveldb/storage"
@@ -54,11 +57,21 @@ type DBImpl struct {
 	scheduler *Scheduler
 
 	opt *options.Options
+
+	dbLock storage.FileLock
+
+	pendingOutputs map[uint64]struct{}
 }
 
 func (dbImpl *DBImpl) Put(key []byte, value []byte) error {
 	wb := NewWriteBatch()
 	wb.Put(key, value)
+	return dbImpl.write(wb)
+}
+
+func (dbImpl *DBImpl) Del(key []byte) error {
+	wb := NewWriteBatch()
+	wb.Delete(key)
 	return dbImpl.write(wb)
 }
 
@@ -216,7 +229,7 @@ func (dbImpl *DBImpl) writeMem(mem *MemDB, batch *WriteBatch) error {
 
 	reqLen := len(batch.rep)
 
-	for i := 0; i < batch.count; i++ {
+	for i := 0; i < int(batch.count); i++ {
 		c := batch.rep[idx]
 		idx += 1
 		utils.Assert(idx < reqLen)
@@ -447,21 +460,27 @@ func (dbImpl *DBImpl) compactMemTable() {
 	edit := &VersionEdit{}
 	err := dbImpl.writeLevel0Table(dbImpl.imm, edit)
 	if err == nil {
+		if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
+			err = errors.ErrClosed
+		}
+		edit.setLogNum(dbImpl.journalFd.Num)
+		edit.setLastSeq(dbImpl.frozenSeq)
+		err = dbImpl.versionSet.logAndApply(edit, &dbImpl.rwMutex)
+	}
+
+	if err == nil {
 		imm := dbImpl.imm
 		imm.UnRef()
 		dbImpl.imm = nil
 		atomic.StoreUint32(&dbImpl.hasImm, 0)
-		edit.setLogNum(dbImpl.journalFd.Num)
-		edit.setLastSeq(dbImpl.frozenSeq)
-		err = dbImpl.versionSet.logAndApply(edit, &dbImpl.rwMutex)
-		if err == nil {
-			err = dbImpl.removeObsoleteFiles()
-		}
+		_ = dbImpl.removeObsoleteFiles()
+	} else {
+		dbImpl.bgErr = err
+		dbImpl.backgroundWorkFinishedSignal.Broadcast()
 	}
 
-	if err != nil {
-		dbImpl.recordBackgroundError(err)
-	}
+	return
+
 }
 
 func (dbImpl *DBImpl) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err error) {
@@ -470,11 +489,13 @@ func (dbImpl *DBImpl) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err err
 
 	var fileMeta tFile
 	fileMeta.fd = int(dbImpl.versionSet.allocFileNum())
+	dbImpl.pendingOutputs[uint64(fileMeta.fd)] = struct{}{}
 	dbImpl.rwMutex.Unlock()
 	defer func() {
 		dbImpl.rwMutex.Lock()
 		if err != nil {
 			dbImpl.versionSet.reuseFileNum(uint64(fileMeta.fd))
+			delete(dbImpl.pendingOutputs, uint64(fileMeta.fd))
 		}
 	}()
 
@@ -501,16 +522,17 @@ func (dbImpl *DBImpl) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err err
 	return
 }
 
-func Open(dbpath string, option options.Options) (db DB, err error) {
+func Open(dbpath string, option *options.Options) (db DB, err error) {
 	opt, err := sanitizeOptions(dbpath, option)
 	if err != nil {
 		return
 	}
+
 	dbImpl := newDBImpl(opt)
 	dbImpl.rwMutex.Lock()
 	defer dbImpl.rwMutex.Unlock()
-
-	err = dbImpl.recover()
+	edit := VersionEdit{}
+	err = dbImpl.recover(&edit)
 	if err != nil {
 		return
 	}
@@ -531,13 +553,15 @@ func Open(dbpath string, option options.Options) (db DB, err error) {
 
 		dbImpl.journalFd = journalFd
 		dbImpl.journalWriter = wal.NewJournalWriter(sequentialWriter)
-		edit := &VersionEdit{}
-		edit.setLastSeq(dbImpl.seqNum)
 		edit.setLogNum(dbImpl.journalFd.Num)
-		err = dbImpl.versionSet.logAndApply(edit, &dbImpl.rwMutex)
+		err = dbImpl.versionSet.logAndApply(&edit, &dbImpl.rwMutex)
 		if err != nil {
 			return
 		}
+	}
+
+	for _, v := range edit.addedTables {
+		delete(dbImpl.pendingOutputs, v.number)
 	}
 
 	err = dbImpl.removeObsoleteFiles()
@@ -550,7 +574,14 @@ func Open(dbpath string, option options.Options) (db DB, err error) {
 	return
 }
 
-func (dbImpl *DBImpl) recover() error {
+func (dbImpl *DBImpl) recover(edit *VersionEdit) error {
+
+	fLock, err := dbImpl.opt.Storage.LockFile(storage.FileLockFd())
+	if err != nil {
+		return err
+	}
+	dbImpl.dbLock = fLock
+
 	manifestFd, err := dbImpl.opt.Storage.GetCurrent()
 	if err != nil {
 		if err != os.ErrNotExist {
@@ -569,36 +600,41 @@ func (dbImpl *DBImpl) recover() error {
 
 	err = dbImpl.versionSet.recover(manifestFd)
 
+	if err != nil {
+		return err
+	}
+
 	fds, err := dbImpl.opt.Storage.List()
 	if err != nil {
 		return err
 	}
 
-	logFiles := make([]storage.Fd, 0)
+	// check table files is exists
+	expected := make(map[uint64]struct{})
+	dbImpl.versionSet.addLiveFiles(expected)
 
+	logFiles := make([]storage.Fd, 0)
 	for _, fd := range fds {
 		if fd.FileType == storage.KJournalFile && fd.Num >= dbImpl.versionSet.stJournalNum {
 			logFiles = append(logFiles, fd)
+		} else if fd.FileType == storage.KTableFile {
+			delete(expected, fd.Num)
 		}
 	}
+
+	utils.Assert(len(expected) == 0, fmt.Sprintf("ldb file not exists, [%v].ldb", expected))
 
 	sort.Slice(logFiles, func(i, j int) bool {
 		return logFiles[i].Num < logFiles[j].Num
 	})
 
-	var edit VersionEdit
-
 	for _, logFile := range logFiles {
-		err = dbImpl.recoverLogFile(logFile, &edit)
+		err = dbImpl.recoverLogFile(logFile, edit)
 		if err != nil {
 			return err
 		}
 	}
 
-	err = dbImpl.versionSet.logAndApply(&edit, &dbImpl.rwMutex)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -674,7 +710,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 			if err != nil {
 				return err
 			}
-			if memDB.ApproximateSize() > options.KMemTableWriteBufferSize {
+			if memDB.ApproximateSize() > int(dbImpl.opt.WriteBufferSize) {
 				err = dbImpl.writeLevel0Table(memDB, edit)
 				if err != nil {
 					return err
@@ -695,7 +731,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 
 	}
 
-	if memDB.Size() > 0 {
+	if memDB.ApproximateSize() > 0 {
 		err = dbImpl.writeLevel0Table(memDB, edit)
 		if err != nil {
 			return err
@@ -703,7 +739,6 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 	}
 
 	edit.setLastSeq(dbImpl.seqNum)
-	edit.setLogNum(fd.Num)
 	return nil
 
 }
@@ -719,7 +754,7 @@ func (dbImpl *DBImpl) removeObsoleteFiles() (err error) {
 		return
 	}
 
-	liveTableFileSet := make(map[uint64]struct{})
+	liveTableFileSet := dbImpl.pendingOutputs
 	dbImpl.versionSet.addLiveFiles(liveTableFileSet)
 
 	fileToClean := make([]storage.Fd, 0)
@@ -761,25 +796,85 @@ func (dbImpl *DBImpl) removeObsoleteFiles() (err error) {
 	return
 }
 
-func sanitizeOptions(dbpath string, options options.Options) (*options.Options, error) {
-	return nil, nil
+func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, err error) {
+
+	opt = new(options.Options)
+
+	if o == nil || o.Storage == nil {
+		opt.Storage, err = storage.OpenPath(dbpath)
+		if err != nil {
+			return
+		}
+	}
+
+	if o == nil || o.InternalComparer == nil {
+		opt.InternalComparer = IComparer
+	}
+
+	if o == nil || o.FilterPolicy == nil {
+		opt.FilterPolicy = IFilter
+	}
+
+	if o == nil || o.Hash32 == nil {
+		opt.Hash32 = fnv.New32()
+	}
+
+	if o == nil || o.BlockCache == nil {
+		opt.BlockCache = cache.NewCache(8<<20, opt.Hash32)
+	}
+
+	if o == nil || o.BlockRestartInterval == 0 {
+		opt.BlockRestartInterval = 16
+	}
+
+	if o == nil || o.BlockSize == 0 {
+		opt.BlockSize = 4 << 10 // 4k
+	}
+
+	if o == nil || o.MaxEstimateFileSize == 0 {
+		opt.MaxEstimateFileSize = 2 << 20 // 2m
+	}
+
+	if o == nil || o.GPOverlappedLimit == 0 {
+		opt.GPOverlappedLimit = 10
+	}
+
+	if o == nil || o.MaxCompactionLimitFactor == 0 {
+		opt.MaxCompactionLimitFactor = 25
+	}
+
+	if o == nil || o.WriteBufferSize == 0 {
+		opt.WriteBufferSize = options.KMemTableWriteBufferSize // 4m
+	}
+
+	if o == nil || o.MaxManifestFileSize == 0 {
+		opt.MaxManifestFileSize = 64 << 20 // 64m
+	}
+
+	if o == nil || o.MaxOpenFiles == 0 {
+		opt.MaxOpenFiles = 1000 // 1000
+	}
+	return
 }
 
 func newDBImpl(opt *options.Options) *DBImpl {
 
 	db := &DBImpl{
+		rwMutex: sync.RWMutex{},
 		versionSet: &VersionSet{
 			versions:    list.New(),
 			compactPtrs: [7]compactPtr{},
 			tableCache:  newTableCache(opt),
 			opt:         opt,
 		},
-		writers:    list.New(),
-		hasImm:     0,
-		tableCache: newTableCache(opt),
-		snapshots:  list.New(),
-		opt:        opt,
-		closed:     make(chan struct{}),
+		closed:         make(chan struct{}),
+		scratchBatch:   NewWriteBatch(),
+		writers:        list.New(),
+		hasImm:         0,
+		tableCache:     newTableCache(opt),
+		snapshots:      list.New(),
+		opt:            opt,
+		pendingOutputs: make(map[uint64]struct{}),
 	}
 
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)

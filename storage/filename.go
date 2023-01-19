@@ -85,3 +85,9 @@ func ParseFd(fileName string) (fd Fd, err error) {
 	}
 	return
 }
+
+func FileLockFd() Fd {
+	return Fd{
+		FileType: KDBLockFile,
+	}
+}

@@ -45,14 +45,18 @@ type Syncer interface {
 	Sync() error
 }
 
-type Locker interface {
-	UnLock()
+type FileLock interface {
+	name() string
+	release()
 }
 
 type Storage interface {
 
-	// Lock using file system lock to lock
-	// Lock(fd Fd) (Locker, error)
+	// LockFile using file system lock to lock
+	LockFile(fd Fd) (FileLock, error)
+
+	// UnLockFile using file system lock to unlock file lock
+	UnLockFile(fLock FileLock) error
 
 	NewAppendableFile(fd Fd) (SequentialWriter, error)
 
@@ -82,9 +86,8 @@ type Storage interface {
 }
 
 type FileStorage struct {
-	dbPath string
-	Storage
-	fileLock FileLock
+	dbPath    string
+	lockTable map[string]FileLock
 
 	mmapLimiter *Limiter
 	fdLimiter   *Limiter
@@ -93,26 +96,16 @@ type FileStorage struct {
 	open  int32
 }
 
-type FileLock interface {
-	Release()
-}
-
 func OpenPath(dbPath string) (Storage, error) {
-
 	err := os.MkdirAll(dbPath, 0644)
-	if err != nil {
-		return nil, err
-	}
-
-	fileLock, err := lockFile(path.Join(dbPath, "LOCK"))
 	if err != nil {
 		return nil, err
 	}
 	fs := &FileStorage{
 		dbPath:      dbPath,
-		fileLock:    fileLock,
 		mmapLimiter: NewLimiter(int32(mmapOpenFile())),
 		fdLimiter:   NewLimiter(int32(maxOpenFile())),
+		lockTable:   make(map[string]FileLock),
 	}
 	runtime.SetFinalizer(fs, (*FileStorage).Close)
 	return fs, nil
@@ -129,7 +122,6 @@ func (fs *FileStorage) Close() error {
 		// todo warming log
 	}
 	fs.open = -1
-	fs.fileLock.Release()
 	runtime.SetFinalizer(fs, nil)
 	return nil
 }
@@ -507,6 +499,41 @@ func (fs *FileStorage) FileSize(fd Fd) (int64, error) {
 
 	return info.Size(), nil
 
+}
+
+func (fs *FileStorage) LockFile(fd Fd) (FileLock, error) {
+	fs.mutex.Lock()
+	defer fs.mutex.Unlock()
+	lockFilePath := path.Join(fs.dbPath, fd.String())
+
+	if _, ok := fs.lockTable[lockFilePath]; ok {
+		return nil, errors.ErrLocked
+	}
+	fLock, err := lockFile(lockFilePath)
+	if err == nil {
+		fs.lockTable[lockFilePath] = fLock
+		fs.open++
+		return fLock, nil
+	}
+	return nil, err
+}
+
+func (fs *FileStorage) UnLockFile(fLock FileLock) error {
+	fs.mutex.Lock()
+	defer fs.mutex.Unlock()
+	if fLock == nil || fs.lockTable == nil {
+		return errors.ErrNotLocked
+	}
+
+	lockFilePath := fLock.name()
+	if fLock, ok := fs.lockTable[lockFilePath]; !ok {
+		return errors.ErrNotLocked
+	} else {
+		fLock.release()
+		fs.open--
+		delete(fs.lockTable, lockFilePath)
+		return nil
+	}
 }
 
 func (fs *FileStorage) ref() (err error) {

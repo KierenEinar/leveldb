@@ -71,8 +71,8 @@ type Options struct {
 	// ldb max estimate file size, table size always effect when persist block, set default 2m
 	MaxEstimateFileSize uint32
 
-	// VerifyCheckSum verify the ldb data block content check sum, set default true
-	VerifyCheckSum bool
+	// NoVerifyCheckSum verify the ldb data block content check sum, set default false
+	NoVerifyCheckSum bool
 
 	// compaction input's overlapped with grand parent level table count, set default 10
 	GPOverlappedLimit int

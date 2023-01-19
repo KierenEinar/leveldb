@@ -11,7 +11,7 @@ import (
 
 type WriteBatch struct {
 	seq     Sequence
-	count   int
+	count   uint32
 	scratch [binary.MaxVarintLen64]byte
 	rep     []byte
 }
@@ -23,8 +23,8 @@ func NewWriteBatch() *WriteBatch {
 }
 
 func (wb *WriteBatch) Put(key, value []byte) {
-
 	wb.count++
+	wb.SetCount(wb.count)
 	wb.rep = append(wb.rep, byte(KeyTypeValue))
 	n := binary.PutUvarint(wb.scratch[:], uint64(len(key)))
 	wb.rep = append(wb.rep, wb.scratch[:n]...)
@@ -37,6 +37,7 @@ func (wb *WriteBatch) Put(key, value []byte) {
 
 func (wb *WriteBatch) Delete(key []byte) {
 	wb.count++
+	wb.SetCount(wb.count)
 	wb.rep = append(wb.rep, byte(KeyTypeDel))
 	n := binary.PutUvarint(wb.scratch[:], uint64(len(key)))
 	wb.rep = append(wb.rep, wb.scratch[:n]...)
@@ -48,9 +49,12 @@ func (wb *WriteBatch) SetSequence(seq Sequence) {
 	binary.LittleEndian.PutUint64(wb.rep[:8], uint64(seq))
 }
 
+func (wb *WriteBatch) SetCount(count uint32) {
+	binary.LittleEndian.PutUint32(wb.rep[8:], count)
+}
+
 func (wb *WriteBatch) Contents() []byte {
-	binary.LittleEndian.PutUint32(wb.rep[8:], uint32(wb.count))
-	return wb.rep[:]
+	return wb.rep
 }
 
 func (wb *WriteBatch) Reset() {
@@ -59,7 +63,7 @@ func (wb *WriteBatch) Reset() {
 }
 
 func (wb *WriteBatch) Len() int {
-	return wb.count
+	return int(wb.count)
 }
 
 func (wb *WriteBatch) Size() int {

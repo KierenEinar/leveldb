@@ -51,7 +51,8 @@ type Version struct {
 
 func newVersion(vSet *VersionSet) *Version {
 	return &Version{
-		vSet: vSet,
+		vSet:          vSet,
+		BasicReleaser: &utils.BasicReleaser{},
 	}
 }
 
@@ -366,10 +367,13 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 
 	// apply new version
 	v := newVersion(vSet)
-	builder := newBuilder(vSet, vSet.current)
+	current := vSet.getCurrent()
+	current.Ref()
+	builder := newBuilder(vSet, current)
 	builder.apply(*edit)
 	builder.saveTo(v)
 	finalize(v)
+	current.UnRef()
 
 	var (
 		stor           = vSet.opt.Storage
@@ -529,7 +533,7 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 		version Version
 	)
 
-	vBuilder := newBuilder(vSet, nil)
+	vBuilder := newBuilder(vSet, newVersion(vSet))
 	journalReader := wal.NewJournalReader(reader)
 	for {
 
