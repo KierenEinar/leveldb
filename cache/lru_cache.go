@@ -99,7 +99,7 @@ func (ht *HandleTable) Erase(key []byte, hash uint32) *LRUHandle {
 }
 
 func (ht *HandleTable) FindPointer(key []byte, hash uint32) **LRUHandle {
-	slot := hash & ht.slots
+	slot := hash & (ht.slots - 1)
 	ptr := &ht.list[slot]
 	for *ptr != nil && (*ptr).hash != hash || bytes.Compare((*ptr).key, key) != 0 {
 		ptr = &(*ptr).nextHash
@@ -122,7 +122,7 @@ func (ht *HandleTable) Resize(growth bool) {
 	for i := uint32(0); i < ht.slots; i++ {
 		ptr := &ht.list[i]
 		for *ptr != nil {
-			head := &newList[(*ptr).hash&newSlots]
+			head := &newList[(*ptr).hash&(newSlots-1)]
 			next := (*ptr).nextHash
 			if *head != nil {
 				(*ptr).nextHash = *head
@@ -152,11 +152,11 @@ type LRUCache struct {
 
 func (lruCache *LRUCache) Close() {
 	lruCache.rwMutex.Lock()
-	defer lruCache.rwMutex.Unlock()
 	for inUse := lruCache.inUse.next; inUse != &lruCache.inUse; inUse = inUse.next {
 		lruCache.finishErase(inUse)
 	}
 	utils.Assert(lruCache.inUse.next == &lruCache.inUse)
+	lruCache.rwMutex.Unlock()
 	lruCache.Prune()
 }
 
@@ -323,11 +323,11 @@ func (c *ShardedLRUCache) Prune() {
 func (c *ShardedLRUCache) hash(key []byte) uint32 {
 	c.hash32.Reset()
 	_, _ = c.hash32.Write(key)
-	return c.hash32.Sum32() >> (32 - kNumShardBits)
+	return c.hash32.Sum32() & (1<<kNumShardBits - 1)
 }
 
 func (c *ShardedLRUCache) UnRef(h *LRUHandle) {
-	cache := c.caches[h.hash>>(32-kNumShardBits)]
+	cache := c.caches[h.hash&(1<<kNumShardBits-1)]
 	cache.rwMutex.Lock()
 	defer cache.rwMutex.Unlock()
 	cache.UnRef(h)

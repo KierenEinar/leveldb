@@ -14,11 +14,12 @@ type WriteBatch struct {
 	count   uint32
 	scratch [binary.MaxVarintLen64]byte
 	rep     []byte
+	pos     int
 }
 
 func NewWriteBatch() *WriteBatch {
 	wb := new(WriteBatch)
-	wb.rep = make([]byte, options.KWriteBatchSeqSize)
+	wb.Reset()
 	return wb
 }
 
@@ -46,11 +47,11 @@ func (wb *WriteBatch) Delete(key []byte) {
 
 func (wb *WriteBatch) SetSequence(seq Sequence) {
 	wb.seq = seq
-	binary.LittleEndian.PutUint64(wb.rep[:8], uint64(seq))
+	binary.LittleEndian.PutUint64(wb.rep[:options.KWriteBatchSeqSize], uint64(seq))
 }
 
 func (wb *WriteBatch) SetCount(count uint32) {
-	binary.LittleEndian.PutUint32(wb.rep[8:], count)
+	binary.LittleEndian.PutUint32(wb.rep[options.KWriteBatchSeqSize:], count)
 }
 
 func (wb *WriteBatch) Contents() []byte {
@@ -59,6 +60,7 @@ func (wb *WriteBatch) Contents() []byte {
 
 func (wb *WriteBatch) Reset() {
 	wb.count = 0
+	wb.pos = options.KWriteBatchHeaderSize
 	wb.rep = wb.rep[:options.KWriteBatchHeaderSize] // resize to header
 }
 
@@ -171,7 +173,7 @@ func (wb *WriteBatch) foreach(fn func(kt KeyType, ukey []byte, seq Sequence, val
 
 	pos := options.KWriteBatchHeaderSize
 
-	for i := 0; i < wb.count; i++ {
+	for i := 0; i < int(wb.count); i++ {
 
 		var (
 			ukey, value []byte

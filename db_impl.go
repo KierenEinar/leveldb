@@ -162,18 +162,18 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	}
 
 	if w.done {
+		dbImpl.rwMutex.Unlock()
 		return w.err
 	}
 
 	// may temporary unlock and lock mutex
 	err := dbImpl.makeRoomForWrite()
-	lastWriter := w
 
 	lastSequence := dbImpl.seqNum
 
 	if err == nil {
-		newWriteBatch := dbImpl.mergeWriteBatch(&lastWriter) // write into scratchbatch
-		dbImpl.scratchBatch.SetSequence(lastSequence + 1)
+		newWriteBatch, lastWriter := dbImpl.mergeWriteBatch() // write into scratchbatch
+		newWriteBatch.SetSequence(lastSequence + 1)
 		lastSequence += Sequence(dbImpl.scratchBatch.Len())
 		mem := dbImpl.mem
 		mem.Ref()
@@ -293,7 +293,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 			dbImpl.rwMutex.Unlock()
 			time.Sleep(time.Microsecond * 1000)
 			dbImpl.rwMutex.Lock()
-		} else if dbImpl.mem.ApproximateSize() <= options.KMemTableWriteBufferSize {
+		} else if dbImpl.mem.ApproximateSize() <= int(dbImpl.opt.WriteBufferSize) {
 			break
 		} else if dbImpl.imm != nil { // wait background compaction compact imm table
 			dbImpl.backgroundWorkFinishedSignal.Wait()
@@ -330,10 +330,9 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 	return nil
 }
 
-func (dbImpl *DBImpl) mergeWriteBatch(lastWriter **writer) *WriteBatch {
+func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.Element) {
 
 	utils.AssertMutexHeld(&dbImpl.rwMutex)
-
 	utils.Assert(dbImpl.writers.Len() > 0)
 
 	front := dbImpl.writers.Front()
@@ -345,7 +344,8 @@ func (dbImpl *DBImpl) mergeWriteBatch(lastWriter **writer) *WriteBatch {
 		maxSize = size + 128<<10
 	}
 
-	result := firstBatch
+	result = firstBatch
+	lastWriter = front
 	w := front.Next()
 	for w != nil {
 		wr := w.Value.(*writer)
@@ -357,11 +357,11 @@ func (dbImpl *DBImpl) mergeWriteBatch(lastWriter **writer) *WriteBatch {
 			result.append(firstBatch)
 		}
 		result.append(wr.batch)
-		lastWriter = &wr
+		lastWriter = w
 		w = w.Next()
 	}
 
-	return result
+	return
 
 }
 
@@ -443,11 +443,11 @@ func (dbImpl *DBImpl) backgroundCompaction() {
 			dbImpl.recordBackgroundError(err)
 		}
 		c.releaseInputs()
+		dbImpl.cleanupCompaction(c)
 		err = dbImpl.removeObsoleteFiles()
 		if err != nil {
 			// todo log warn msg
 		}
-
 	}
 
 }
@@ -457,11 +457,19 @@ func (dbImpl *DBImpl) compactMemTable() {
 	utils.AssertMutexHeld(&dbImpl.rwMutex)
 	utils.Assert(dbImpl.imm != nil)
 
+	var err error
+	defer func() {
+		if err != nil {
+			dbImpl.recordBackgroundError(err)
+		}
+	}()
+
 	edit := &VersionEdit{}
-	err := dbImpl.writeLevel0Table(dbImpl.imm, edit)
+	err = dbImpl.writeLevel0Table(dbImpl.imm, edit)
 	if err == nil {
 		if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
 			err = errors.ErrClosed
+			return
 		}
 		edit.setLogNum(dbImpl.journalFd.Num)
 		edit.setLastSeq(dbImpl.frozenSeq)
@@ -474,9 +482,6 @@ func (dbImpl *DBImpl) compactMemTable() {
 		dbImpl.imm = nil
 		atomic.StoreUint32(&dbImpl.hasImm, 0)
 		_ = dbImpl.removeObsoleteFiles()
-	} else {
-		dbImpl.bgErr = err
-		dbImpl.backgroundWorkFinishedSignal.Broadcast()
 	}
 
 	return
@@ -881,4 +886,30 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	db.tableOperation = newTableOperation(opt, db.tableCache)
 	db.scheduler = NewSchedule(db.closed)
 	return db
+}
+
+func (dbImpl *DBImpl) cleanupCompaction(c *compaction1) {
+
+	for output := range c.outputs {
+		delete(dbImpl.pendingOutputs, output)
+	}
+
+	if c.err == nil {
+		utils.Assert(c.tWriter == nil)
+		return
+	}
+
+	var max uint64
+	for output := range c.outputs {
+		if max < output {
+			max = output
+		}
+	}
+
+	dbImpl.versionSet.reuseFileNum(max)
+
+	if c.tWriter != nil {
+		_ = c.tWriter.w.Close()
+	}
+
 }

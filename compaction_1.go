@@ -3,6 +3,7 @@ package leveldb
 import (
 	"bytes"
 	"leveldb/comparer"
+	"leveldb/errors"
 	"leveldb/iterator"
 	"leveldb/options"
 	"leveldb/utils"
@@ -25,8 +26,8 @@ type compaction1 struct {
 
 	inputOverlappedGPIndex int
 
-	opt *options.Options
-
+	opt            *options.Options
+	outputs        map[uint64]struct{}
 	minSeq         Sequence
 	tWriter        *tWriter
 	tableOperation *tableOperation
@@ -34,6 +35,8 @@ type compaction1 struct {
 	edit           VersionEdit
 
 	baseLevelI [options.KLevelNum]int
+
+	err error
 }
 
 func (vSet *VersionSet) pickCompaction1() *compaction1 {
@@ -208,9 +211,15 @@ func (tFiles tFiles) getRange1(cmp comparer.Comparer) (imin, imax InternalKey) {
 	return
 }
 
-func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
+func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 
 	utils.AssertMutexHeld(&dbImpl.rwMutex)
+
+	defer func() {
+		if err != nil {
+			c.err = err
+		}
+	}()
 
 	if dbImpl.snapshots.Len() == 0 {
 		c.minSeq = dbImpl.seqNum
@@ -222,13 +231,13 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 
 	iter, iterErr := c.makeInputIterator()
 	if iterErr != nil {
-		return iterErr
+		err = iterErr
+		return
 	}
 	defer iter.UnRef()
 
 	var (
 		drop     bool
-		err      error
 		lastIKey InternalKey
 		lastSeq  Sequence
 	)
@@ -289,33 +298,34 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 		if c.tWriter == nil {
 			dbImpl.rwMutex.Lock()
 			nextFd := dbImpl.versionSet.allocFileNum()
+			dbImpl.pendingOutputs[nextFd] = struct{}{}
 			dbImpl.rwMutex.Unlock()
 			fileMeta := tFile{
 				fd: int(nextFd),
 			}
+			c.outputs[nextFd] = struct{}{}
 			if c.tWriter, err = c.tableOperation.create(fileMeta); err != nil {
-				dbImpl.rwMutex.Lock()
-				dbImpl.versionSet.reuseFileNum(nextFd)
-				dbImpl.rwMutex.Unlock()
 				break
 			}
 		}
 
 		if err = c.tWriter.append(inputKey, value); err != nil {
-			dbImpl.rwMutex.Lock()
-			dbImpl.versionSet.reuseFileNum(uint64(c.tWriter.fileMeta.fd))
-			dbImpl.rwMutex.Unlock()
 			break
 		}
 	}
 
-	if c.tWriter != nil {
+	if err == nil && c.tWriter != nil {
 		err = dbImpl.finishCompactionOutputFile(c)
 	}
 
 	dbImpl.rwMutex.Lock()
 
 	if err == nil {
+
+		if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
+			return errors.ErrClosed
+		}
+
 		for _, input := range c.inputs {
 			for which, table := range input {
 				c.edit.addDelTable(which+c.sourceLevel, uint64(table.fd))
@@ -324,8 +334,7 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) error {
 
 		err = dbImpl.versionSet.logAndApply(&c.edit, &dbImpl.rwMutex)
 	}
-
-	return err
+	return
 
 }
 
