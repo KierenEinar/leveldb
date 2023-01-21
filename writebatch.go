@@ -2,6 +2,8 @@ package leveldb
 
 import (
 	"encoding/binary"
+	"io"
+	"leveldb/collections"
 	"leveldb/errors"
 	"leveldb/options"
 	"leveldb/storage"
@@ -13,55 +15,84 @@ type WriteBatch struct {
 	seq     Sequence
 	count   uint32
 	scratch [binary.MaxVarintLen64]byte
-	rep     []byte
-	pos     int
+	header  [options.KWriteBatchHeaderSize]byte
+	rep     *collections.LinkedBlockBuffer
 }
 
 func NewWriteBatch() *WriteBatch {
 	wb := new(WriteBatch)
+	wb.rep = collections.NewLinkedBlockBuffer(1 << 10)
 	wb.Reset()
 	return wb
 }
 
-func (wb *WriteBatch) Put(key, value []byte) {
+func (wb *WriteBatch) Put(key, value []byte) (err error) {
 	wb.count++
 	wb.SetCount(wb.count)
-	wb.rep = append(wb.rep, byte(KeyTypeValue))
-	n := binary.PutUvarint(wb.scratch[:], uint64(len(key)))
-	wb.rep = append(wb.rep, wb.scratch[:n]...)
-	wb.rep = append(wb.rep, key...)
 
+	// key type
+	if err = wb.rep.WriteByte(byte(KeyTypeValue)); err != nil {
+		return
+	}
+	// key len
+	n := binary.PutUvarint(wb.scratch[:], uint64(len(key)))
+	if _, err = wb.rep.Write(wb.scratch[:n]); err != nil {
+		return
+	}
+	// key
+	if _, err = wb.rep.Write(key); err != nil {
+		return
+	}
+
+	// value len
 	n = binary.PutUvarint(wb.scratch[:], uint64(len(value)))
-	wb.rep = append(wb.rep, wb.scratch[:n]...)
-	wb.rep = append(wb.rep, value...)
+	if _, err = wb.rep.Write(wb.scratch[:n]); err != nil {
+		return
+	}
+
+	// value
+	if _, err = wb.rep.Write(value); err != nil {
+		return
+	}
+
+	return
 }
 
-func (wb *WriteBatch) Delete(key []byte) {
+func (wb *WriteBatch) Delete(key []byte) (err error) {
 	wb.count++
 	wb.SetCount(wb.count)
-	wb.rep = append(wb.rep, byte(KeyTypeDel))
+
+	// key type
+	if err = wb.rep.WriteByte(byte(KeyTypeDel)); err != nil {
+		return
+	}
+	// key len
 	n := binary.PutUvarint(wb.scratch[:], uint64(len(key)))
-	wb.rep = append(wb.rep, wb.scratch[:n]...)
-	wb.rep = append(wb.rep, key...)
+	if _, err = wb.rep.Write(wb.scratch[:n]); err != nil {
+		return
+	}
+	// key
+	if _, err = wb.rep.Write(key); err != nil {
+		return
+	}
+	return
 }
 
 func (wb *WriteBatch) SetSequence(seq Sequence) {
 	wb.seq = seq
-	binary.LittleEndian.PutUint64(wb.rep[:options.KWriteBatchSeqSize], uint64(seq))
+	binary.LittleEndian.PutUint64(wb.header[:options.KWriteBatchSeqSize], uint64(seq))
+	wb.rep.Update(0, wb.header[:options.KWriteBatchSeqSize])
 }
 
 func (wb *WriteBatch) SetCount(count uint32) {
-	binary.LittleEndian.PutUint32(wb.rep[options.KWriteBatchSeqSize:], count)
-}
-
-func (wb *WriteBatch) Contents() []byte {
-	return wb.rep
+	binary.LittleEndian.PutUint32(wb.header[options.KWriteBatchSeqSize:], count)
+	wb.rep.Update(options.KWriteBatchSeqSize, wb.header[options.KWriteBatchSeqSize:])
 }
 
 func (wb *WriteBatch) Reset() {
 	wb.count = 0
-	wb.pos = options.KWriteBatchHeaderSize
-	wb.rep = wb.rep[:options.KWriteBatchHeaderSize] // resize to header
+	wb.rep.Reset()
+	_, _ = wb.rep.Write(wb.header[:])
 }
 
 func (wb *WriteBatch) Len() int {
@@ -69,16 +100,49 @@ func (wb *WriteBatch) Len() int {
 }
 
 func (wb *WriteBatch) Size() int {
-	return len(wb.rep)
+	return wb.rep.Len()
 }
 
 func (wb *WriteBatch) Capacity() int {
-	return cap(wb.rep)
+	return wb.rep.Cap()
 }
 
-func (dst *WriteBatch) append(src *WriteBatch) {
-	dst.count += src.count
-	dst.rep = append(dst.rep, src.rep...)
+func (wb *WriteBatch) append(src *WriteBatch) error {
+	wb.count += src.count
+	minRead := 1024
+	tmp := make([]byte, minRead)
+	firstRead := true
+	for {
+		n, rErr := src.rep.Read(tmp)
+		if rErr != nil && rErr != io.EOF {
+			return rErr
+		}
+
+		if n == 0 {
+			break
+		}
+
+		if firstRead {
+			_, err := src.rep.Write(tmp[options.KWriteBatchHeaderSize:n])
+			if err != nil {
+				return err
+			}
+			firstRead = false
+			continue
+		}
+
+		_, err := src.rep.Write(tmp[:n])
+		if err != nil {
+			return err
+		}
+
+		if rErr == io.EOF {
+			break
+		}
+	}
+
+	return nil
+
 }
 
 type writer struct {

@@ -3,6 +3,7 @@ package collections
 import (
 	"errors"
 	"io"
+	"io/ioutil"
 )
 
 type LinkedBlockBuffer struct {
@@ -139,6 +140,16 @@ func (lb *LinkedBlockBuffer) Read(p []byte) (n int, err error) {
 	return readN, nil
 }
 
+func (lb *LinkedBlockBuffer) WriteByte(b byte) (err error) {
+	p := make([]byte, 1)
+	p[0] = b
+	_, err = lb.Write(p)
+	if err != nil {
+		return
+	}
+	return
+}
+
 func (lb *LinkedBlockBuffer) ReadByte() (b byte, err error) {
 	p := make([]byte, 1)
 	_, err = lb.Read(p)
@@ -179,6 +190,11 @@ func (lb *LinkedBlockBuffer) Update(s int, p []byte) (n int) {
 
 	return
 
+}
+
+func (lb *LinkedBlockBuffer) Bytes() ([]byte, error) {
+	p, err := ioutil.ReadAll(lb)
+	return p, err
 }
 
 func (lb *LinkedBlockBuffer) Reset() {

@@ -58,6 +58,36 @@ func NewJournalWriter(writer storage.SequentialWriter) *JournalWriter {
 	}
 }
 
+func (jw *JournalWriter) ReadFrom(reader io.Reader) (n int64, err error) {
+	minRead := 1024
+	tmp := make([]byte, minRead)
+
+	for {
+		m1, rErr := reader.Read(tmp)
+		if rErr != nil && rErr != io.EOF {
+			err = rErr
+			return
+		}
+
+		// read end
+		if m1 == 0 {
+			break
+		}
+
+		m2, wErr := jw.Write(tmp[:m1])
+		n += int64(m2)
+		if wErr != nil {
+			err = wErr
+			return
+		}
+
+		if rErr == io.EOF {
+			break
+		}
+	}
+	return
+}
+
 func (jw *JournalWriter) Write(chunk []byte) (n int, err error) {
 
 	if jw.err != nil {

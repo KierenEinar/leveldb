@@ -65,13 +65,17 @@ type DBImpl struct {
 
 func (dbImpl *DBImpl) Put(key []byte, value []byte) error {
 	wb := NewWriteBatch()
-	wb.Put(key, value)
+	if err := wb.Put(key, value); err != nil {
+		return err
+	}
 	return dbImpl.write(wb)
 }
 
 func (dbImpl *DBImpl) Del(key []byte) error {
 	wb := NewWriteBatch()
-	wb.Delete(key)
+	if err := wb.Delete(key); err != nil {
+		return err
+	}
 	return dbImpl.write(wb)
 }
 
@@ -179,7 +183,7 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 		mem.Ref()
 		dbImpl.rwMutex.Unlock()
 		// expensive syscall need to unlock !!!
-		_, syncErr := dbImpl.journalWriter.Write(newWriteBatch.Contents())
+		_, syncErr := dbImpl.journalWriter.ReadFrom(newWriteBatch.rep)
 		if syncErr == nil {
 			err = dbImpl.writeMem(mem, newWriteBatch)
 		}
