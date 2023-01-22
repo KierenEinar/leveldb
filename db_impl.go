@@ -176,7 +176,10 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	lastSequence := dbImpl.seqNum
 
 	if err == nil {
-		newWriteBatch, lastWriter := dbImpl.mergeWriteBatch() // write into scratchbatch
+		newWriteBatch, lastWriter, err := dbImpl.mergeWriteBatch() // write into scratchbatch
+		if err != nil {
+			return err
+		}
 		newWriteBatch.SetSequence(lastSequence + 1)
 		lastSequence += Sequence(dbImpl.scratchBatch.Len())
 		mem := dbImpl.mem
@@ -334,7 +337,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 	return nil
 }
 
-func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.Element) {
+func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.Element, err error) {
 
 	utils.AssertMutexHeld(&dbImpl.rwMutex)
 	utils.Assert(dbImpl.writers.Len() > 0)
@@ -348,6 +351,12 @@ func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.El
 		maxSize = size + 128<<10
 	}
 
+	defer func() {
+		if err != nil && result == dbImpl.scratchBatch {
+			result.Reset()
+		}
+	}()
+
 	result = firstBatch
 	lastWriter = front
 	w := front.Next()
@@ -358,9 +367,15 @@ func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.El
 		}
 		if result == firstBatch {
 			result = dbImpl.scratchBatch
-			result.append(firstBatch)
+			err = result.append(firstBatch)
 		}
-		result.append(wr.batch)
+		if err != nil {
+			return
+		}
+		err = result.append(wr.batch)
+		if err != nil {
+			return
+		}
 		lastWriter = w
 		w = w.Next()
 	}

@@ -233,11 +233,9 @@ func (wb *WriteBatch) insertInto(memDb *MemDB) error {
 	return err
 }
 
-func (wb *WriteBatch) foreach(fn func(kt KeyType, ukey []byte, seq Sequence, value []byte) error) error {
+func (wb *WriteBatch) foreach(fn func(kt KeyType, key []byte, seq Sequence, value []byte) error) error {
 
-	pos := options.KWriteBatchHeaderSize
 	wb.rep.ResetRead(0)
-
 	seqN, err := wb.rep.Read(wb.header[:options.KWriteBatchSeqSize])
 	if err != nil {
 		return err
@@ -255,8 +253,8 @@ func (wb *WriteBatch) foreach(fn func(kt KeyType, ukey []byte, seq Sequence, val
 	for i := 0; i < int(wb.count); i++ {
 
 		var (
-			key   *[]byte
-			value *[]byte
+			key   []byte
+			value []byte
 		)
 
 		kt, err := wb.rep.ReadByte()
@@ -268,8 +266,9 @@ func (wb *WriteBatch) foreach(fn func(kt KeyType, ukey []byte, seq Sequence, val
 		if err != nil {
 			return err
 		}
-		key = utils.PoolGetBytes(int(keyLen))
-		_, err = wb.rep.Read(*key)
+
+		key = *utils.PoolGetBytes(int(keyLen))
+		_, err = wb.rep.Read(key)
 		if err != nil {
 			goto END
 		}
@@ -279,21 +278,21 @@ func (wb *WriteBatch) foreach(fn func(kt KeyType, ukey []byte, seq Sequence, val
 			if err != nil {
 				goto END
 			}
-			value = utils.PoolGetBytes(int(valLen))
-			err = fn(KeyType(kt), *key, wb.seq+Sequence(i), *value)
+			value = *utils.PoolGetBytes(int(valLen))
+			err = fn(KeyType(kt), key, wb.seq+Sequence(i), value)
 			goto END
 		} else {
-			err = fn(KeyType(kt), *key, wb.seq+Sequence(i), nil)
+			err = fn(KeyType(kt), key, wb.seq+Sequence(i), nil)
 			goto END
 		}
 
 	END:
 		if key != nil {
-			utils.PoolPutBytes(key)
+			utils.PoolPutBytes(&key)
 		}
 
 		if value != nil {
-			utils.PoolPutBytes(value)
+			utils.PoolPutBytes(&value)
 		}
 
 		if err != nil {
