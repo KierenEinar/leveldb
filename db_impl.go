@@ -369,10 +369,9 @@ func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.El
 			result = dbImpl.scratchBatch
 			err = result.append(firstBatch)
 		}
-		if err != nil {
-			return
+		if err == nil {
+			err = result.append(wr.batch)
 		}
-		err = result.append(wr.batch)
 		if err != nil {
 			return
 		}
