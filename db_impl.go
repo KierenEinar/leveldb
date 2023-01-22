@@ -2,7 +2,6 @@ package leveldb
 
 import (
 	"container/list"
-	"encoding/binary"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -160,9 +159,13 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	dbImpl.rwMutex.Lock()
 	dbImpl.writers.PushBack(w)
 
-	header := dbImpl.writers.Front().Value.(*writer)
-	for w != header {
-		w.cv.Wait()
+	for {
+		header := dbImpl.writers.Front().Value.(*writer)
+		if header != w && !w.done {
+			w.cv.Wait()
+		} else {
+			break
+		}
 	}
 
 	if w.done {
@@ -176,49 +179,51 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	lastSequence := dbImpl.seqNum
 
 	if err == nil {
-		newWriteBatch, lastWriter, err := dbImpl.mergeWriteBatch() // write into scratchbatch
-		if err != nil {
-			return err
-		}
+		newWriteBatch, lastWriter := dbImpl.mergeWriteBatch() // write into scratchbatch
 		newWriteBatch.SetSequence(lastSequence + 1)
-		lastSequence += Sequence(dbImpl.scratchBatch.Len())
+		lastSequence += Sequence(newWriteBatch.Len())
 		mem := dbImpl.mem
 		mem.Ref()
 		dbImpl.rwMutex.Unlock()
+		defer mem.UnRef()
 		// expensive syscall need to unlock !!!
-		_, syncErr := dbImpl.journalWriter.ReadFrom(newWriteBatch.rep)
-		if syncErr == nil {
-			err = dbImpl.writeMem(mem, newWriteBatch)
+		_, err = dbImpl.journalWriter.ReadFrom(newWriteBatch.rep)
+		if err == nil {
+			err = newWriteBatch.insertInto(mem)
 		}
 
 		dbImpl.rwMutex.Lock()
-		dbImpl.seqNum = lastSequence
+		if err == nil {
+			dbImpl.seqNum = lastSequence
+		}
 
-		if syncErr != nil {
-			dbImpl.recordBackgroundError(syncErr)
+		if err != nil {
+			dbImpl.recordBackgroundError(err)
 		}
 
 		if newWriteBatch == dbImpl.scratchBatch {
-			dbImpl.scratchBatch.Reset()
+			newWriteBatch.Reset()
 		}
 
-		ready := dbImpl.writers.Front()
 		for {
+
+			ready := dbImpl.writers.Front()
+			dbImpl.writers.Remove(ready)
+
 			readyW := ready.Value.(*writer)
-			if readyW != lastWriter {
+			if readyW != w {
 				readyW.done = true
 				readyW.err = err
 				readyW.cv.Signal()
 			}
-			dbImpl.writers.Remove(ready)
-			if readyW == lastWriter {
+
+			if ready == lastWriter {
 				break
 			}
-			ready = ready.Next()
 		}
 
-		if ready.Next() != nil {
-			readyW := ready.Value.(*writer)
+		if dbImpl.writers.Front() != nil {
+			readyW := dbImpl.writers.Front().Value.(*writer)
 			readyW.cv.Signal()
 		}
 
@@ -227,64 +232,6 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	dbImpl.rwMutex.Unlock()
 
 	return err
-}
-
-func (dbImpl *DBImpl) writeMem(mem *MemDB, batch *WriteBatch) error {
-
-	seq := batch.seq
-	idx := 0
-
-	reqLen := len(batch.rep)
-
-	for i := 0; i < int(batch.count); i++ {
-		c := batch.rep[idx]
-		idx += 1
-		utils.Assert(idx < reqLen)
-		kLen, n := binary.Uvarint(batch.rep[idx:])
-		idx += n
-
-		utils.Assert(idx < reqLen)
-		var (
-			key []byte
-			val []byte
-		)
-
-		switch KeyType(c) {
-		case KeyTypeValue:
-			vLen, n := binary.Uvarint(batch.rep[idx:])
-			idx += n
-			utils.Assert(idx < reqLen)
-
-			key = batch.rep[idx : idx+int(kLen)]
-			idx += int(kLen)
-
-			val = batch.rep[idx : idx+int(vLen)]
-			idx += int(vLen)
-			utils.Assert(idx < reqLen)
-
-			err := mem.Put(key, seq+Sequence(i), val)
-			if err != nil {
-				return err
-			}
-
-		case KeyTypeDel:
-			key = batch.rep[idx : idx+int(kLen)]
-			idx += int(kLen)
-			utils.Assert(idx < reqLen)
-
-			err := mem.Del(key, seq+Sequence(i))
-			if err != nil {
-				return err
-			}
-
-		default:
-			panic("invalid key type support")
-		}
-
-	}
-
-	return nil
-
 }
 
 func (dbImpl *DBImpl) makeRoomForWrite() error {
@@ -337,10 +284,12 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 	return nil
 }
 
-func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.Element, err error) {
+func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.Element) {
 
 	utils.AssertMutexHeld(&dbImpl.rwMutex)
 	utils.Assert(dbImpl.writers.Len() > 0)
+
+	var err error
 
 	front := dbImpl.writers.Front()
 	firstBatch := front.Value.(*writer).batch
@@ -350,12 +299,6 @@ func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.El
 	if size < 128<<10 { // limit the growth while in small write
 		maxSize = size + 128<<10
 	}
-
-	defer func() {
-		if err != nil && result == dbImpl.scratchBatch {
-			result.Reset()
-		}
-	}()
 
 	result = firstBatch
 	lastWriter = front
@@ -372,11 +315,22 @@ func (dbImpl *DBImpl) mergeWriteBatch() (result *WriteBatch, lastWriter *list.El
 		if err == nil {
 			err = result.append(wr.batch)
 		}
+
 		if err != nil {
-			return
+			goto ERR
 		}
 		lastWriter = w
 		w = w.Next()
+	}
+
+ERR:
+	if err != nil { // rollback merge
+		// todo warming
+		if result == dbImpl.scratchBatch {
+			result.Reset()
+		}
+		lastWriter = front
+		result = firstBatch
 	}
 
 	return
