@@ -7,12 +7,12 @@ import (
 )
 
 func TestNewLinkedBlockBuffer(t *testing.T) {
-	linkedBlockBuffer := NewLinkedBlockBuffer(1025)
+	linkedBlockBuffer := NewLinkBlockBuffer(1025)
 	t.Logf("%v", linkedBlockBuffer)
 }
 
 func TestLinkedBlockBuffer_Grow(t *testing.T) {
-	linkedBlockBuffer := NewLinkedBlockBuffer(1025)
+	linkedBlockBuffer := NewLinkBlockBuffer(1025)
 	t.Logf("%v", linkedBlockBuffer)
 
 	n, ok := linkedBlockBuffer.Grow(2000)
@@ -29,7 +29,7 @@ func TestLinkedBlockBuffer_Grow(t *testing.T) {
 }
 
 func TestLinkedBlockBuffer_Write(t *testing.T) {
-	linkedBlockBuffer := NewLinkedBlockBuffer(1025)
+	linkedBlockBuffer := NewLinkBlockBuffer(1025)
 	t.Logf("%v", linkedBlockBuffer)
 
 	content := []byte{1}
@@ -51,7 +51,7 @@ func TestLinkedBlockBuffer_Write(t *testing.T) {
 }
 
 func TestLinkedBlockBuffer_Read(t *testing.T) {
-	linkedBlockBuffer := NewLinkedBlockBuffer(1025)
+	linkedBlockBuffer := NewLinkBlockBuffer(1025)
 	t.Logf("%v", linkedBlockBuffer)
 
 	content := []byte{1}
@@ -77,7 +77,7 @@ func TestLinkedBlockBuffer_Read(t *testing.T) {
 }
 
 func TestLinkedBlockBuffer_Update(t *testing.T) {
-	linkedBlockBuffer := NewLinkedBlockBuffer(1025)
+	linkedBlockBuffer := NewLinkBlockBuffer(1025)
 	t.Logf("%v", linkedBlockBuffer)
 
 	content := []byte{1}

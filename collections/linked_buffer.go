@@ -3,10 +3,9 @@ package collections
 import (
 	"errors"
 	"io"
-	"io/ioutil"
 )
 
-type LinkedBlockBuffer struct {
+type LinkBlockBuffer struct {
 	head     *bufferBlock
 	tail     *bufferBlock
 	writeCur *bufferBlock
@@ -19,21 +18,21 @@ type LinkedBlockBuffer struct {
 const _1g = 1 << 30
 const blockSize = 1 << 10
 
-// NewLinkedBlockBuffer create a LinkedBuffer, which means contains multi buffer block
+// NewLinkBlockBuffer create a LinkedBuffer, which means contains multi buffer block
 // each buffer block has 1024 bytes
 // noted: the max cap is limit 1G, other wise will panic
-func NewLinkedBlockBuffer(cap int) *LinkedBlockBuffer {
+func NewLinkBlockBuffer(cap int) *LinkBlockBuffer {
 	// less cap is 1k
 	if cap < blockSize {
 		cap = blockSize
 	}
 
-	lb := &LinkedBlockBuffer{}
+	lb := &LinkBlockBuffer{}
 	lb.Grow(cap)
 	return lb
 }
 
-func (lb *LinkedBlockBuffer) Grow(grow int) (n int, ok bool) {
+func (lb *LinkBlockBuffer) Grow(grow int) (n int, ok bool) {
 
 	blocks := incrBlocks(grow)
 	newCap := lb.cap + blocks*blockSize
@@ -70,13 +69,13 @@ func (lb *LinkedBlockBuffer) Grow(grow int) (n int, ok bool) {
 	return
 }
 
-func (lb *LinkedBlockBuffer) Write(p []byte) (int, error) {
+func (lb *LinkBlockBuffer) Write(p []byte) (int, error) {
 
 	if lb.cap-lb.writePos < len(p) {
 		grow := len(p) - (lb.cap - lb.writePos)
 		_, ok := lb.Grow(grow)
 		if !ok {
-			return 0, errors.New("LinkedBlockBuffer Grow failed")
+			return 0, errors.New("LinkBlockBuffer Grow failed")
 		}
 	}
 
@@ -101,7 +100,7 @@ func (lb *LinkedBlockBuffer) Write(p []byte) (int, error) {
 	return m, nil
 }
 
-func (lb *LinkedBlockBuffer) Read(p []byte) (n int, err error) {
+func (lb *LinkBlockBuffer) Read(p []byte) (n int, err error) {
 
 	pLen := len(p)
 
@@ -140,7 +139,7 @@ func (lb *LinkedBlockBuffer) Read(p []byte) (n int, err error) {
 	return readN, nil
 }
 
-func (lb *LinkedBlockBuffer) WriteByte(b byte) (err error) {
+func (lb *LinkBlockBuffer) WriteByte(b byte) (err error) {
 	p := make([]byte, 1)
 	p[0] = b
 	_, err = lb.Write(p)
@@ -150,7 +149,7 @@ func (lb *LinkedBlockBuffer) WriteByte(b byte) (err error) {
 	return
 }
 
-func (lb *LinkedBlockBuffer) ReadByte() (b byte, err error) {
+func (lb *LinkBlockBuffer) ReadByte() (b byte, err error) {
 	p := make([]byte, 1)
 	_, err = lb.Read(p)
 	if err != nil {
@@ -160,7 +159,7 @@ func (lb *LinkedBlockBuffer) ReadByte() (b byte, err error) {
 	return
 }
 
-func (lb *LinkedBlockBuffer) Update(s int, p []byte) (n int) {
+func (lb *LinkBlockBuffer) Update(s int, p []byte) (n int) {
 
 	pLen := len(p)
 
@@ -192,23 +191,32 @@ func (lb *LinkedBlockBuffer) Update(s int, p []byte) (n int) {
 
 }
 
-func (lb *LinkedBlockBuffer) Bytes() ([]byte, error) {
-	p, err := ioutil.ReadAll(lb)
-	return p, err
-}
-
-func (lb *LinkedBlockBuffer) Reset() {
+func (lb *LinkBlockBuffer) Reset() {
 	lb.readCur = nil
 	lb.readPos = 0
 	lb.writeCur = nil
 	lb.writePos = 0
 }
 
-func (lb *LinkedBlockBuffer) Cap() int {
+func (lb *LinkBlockBuffer) ResetRead(index int) bool {
+	if index >= lb.writePos {
+		return false
+	}
+	blockIndex := index / blockSize
+	block := lb.head
+	for i := 0; i < blockIndex; i++ {
+		block = block.next
+	}
+	lb.readPos = index
+	lb.readCur = block
+	return true
+}
+
+func (lb *LinkBlockBuffer) Cap() int {
 	return lb.cap
 }
 
-func (lb *LinkedBlockBuffer) Len() int {
+func (lb *LinkBlockBuffer) Len() int {
 	return lb.writePos - lb.readPos
 }
 
