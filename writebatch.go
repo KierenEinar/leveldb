@@ -91,6 +91,7 @@ func (wb *WriteBatch) setCount(count uint32) {
 
 func (wb *WriteBatch) Reset() {
 	wb.count = 0
+	wb.seq = 0
 	wb.rep.Reset()
 	_, _ = wb.rep.Write(wb.header[:])
 }
