@@ -159,13 +159,8 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	dbImpl.rwMutex.Lock()
 	dbImpl.writers.PushBack(w)
 
-	for {
-		header := dbImpl.writers.Front().Value.(*writer)
-		if header != w && !w.done {
-			w.cv.Wait()
-		} else {
-			break
-		}
+	for dbImpl.writers.Front().Value.(*writer) != w && !w.done {
+		w.cv.Wait()
 	}
 
 	if w.done {
@@ -177,9 +172,13 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	err := dbImpl.makeRoomForWrite()
 
 	lastSequence := dbImpl.seqNum
+	var (
+		newWriteBatch = batch
+		lastWriter    = dbImpl.writers.Front()
+	)
 
 	if err == nil {
-		newWriteBatch, lastWriter := dbImpl.mergeWriteBatch() // write into scratchbatch
+		newWriteBatch, lastWriter = dbImpl.mergeWriteBatch() // write into scratchbatch
 		newWriteBatch.SetSequence(lastSequence + 1)
 		lastSequence += Sequence(newWriteBatch.Len())
 		mem := dbImpl.mem
@@ -205,28 +204,28 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 			newWriteBatch.Reset()
 		}
 
-		for {
+	}
 
-			ready := dbImpl.writers.Front()
-			dbImpl.writers.Remove(ready)
+	for {
 
-			readyW := ready.Value.(*writer)
-			if readyW != w {
-				readyW.done = true
-				readyW.err = err
-				readyW.cv.Signal()
-			}
+		ready := dbImpl.writers.Front()
+		dbImpl.writers.Remove(ready)
 
-			if ready == lastWriter {
-				break
-			}
-		}
-
-		if dbImpl.writers.Front() != nil {
-			readyW := dbImpl.writers.Front().Value.(*writer)
+		readyW := ready.Value.(*writer)
+		if readyW != w {
+			readyW.done = true
+			readyW.err = err
 			readyW.cv.Signal()
 		}
 
+		if ready == lastWriter {
+			break
+		}
+	}
+
+	if dbImpl.writers.Front() != nil {
+		readyW := dbImpl.writers.Front().Value.(*writer)
+		readyW.cv.Signal()
 	}
 
 	dbImpl.rwMutex.Unlock()
@@ -266,9 +265,9 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 				dbImpl.frozenJournalFd = dbImpl.journalFd
 				dbImpl.journalFd = journalFd
 				dbImpl.journalWriter = wal.NewJournalWriter(writer)
-				imm := dbImpl.imm
-				imm.UnRef()
-				dbImpl.imm = dbImpl.mem
+				imm := dbImpl.mem
+				dbImpl.imm = imm
+
 				atomic.StoreUint32(&dbImpl.hasImm, 1)
 				mem := NewMemTable(int(dbImpl.opt.WriteBufferSize), dbImpl.opt.InternalComparer)
 				mem.Ref()
