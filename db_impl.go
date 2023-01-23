@@ -125,17 +125,13 @@ func memGet(mem *MemDB, ikey InternalKey, value *[]byte, err *error) (ok bool) {
 
 	_, rValue, rErr := mem.Find(ikey)
 	if rErr != nil {
-		if rErr == errors.ErrNotFound {
-			ok = false
-			return
-		}
 		if rErr == errors.ErrKeyDel {
 			*err = errors.ErrNotFound
 			ok = true
 			return
 		}
 		*err = rErr
-		ok = true
+		ok = false
 		return
 	}
 
