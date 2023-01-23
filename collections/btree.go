@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"leveldb/comparer"
+	"leveldb/utils"
 	"sort"
 )
 
@@ -65,7 +66,7 @@ func (btree *BTree) Insert(key []byte, value interface{}) {
 
 // must assert idx less than node.num and node must not full
 func (node *BTreeNode) setKVAndSibling(idx int, key []byte, value interface{}, left, right *BTreeNode) {
-	assert(!node.isFull())
+	utils.Assert(!node.isFull())
 	copy(node.keys[idx+1:node.num+1], node.keys[idx:node.num])
 	copy(node.values[idx+1:node.num+1], node.values[idx:node.num])
 	node.keys[idx] = key
@@ -79,7 +80,7 @@ func (node *BTreeNode) setKVAndSibling(idx int, key []byte, value interface{}, l
 
 // must assert node is full
 func (node *BTreeNode) splitChild() *BTreeNode {
-	assert(node.isFull())
+	utils.Assert(node.isFull())
 
 	t := node.degree
 	z := newNode(t, node.isLeaf)
@@ -452,12 +453,6 @@ func (node *BTreeNode) bfs() {
 		if !node.isLeaf {
 			queue = append(queue, node.siblings[:node.num+1]...)
 		}
-	}
-}
-
-func assert(condition bool, msg ...string) {
-	if !condition {
-		panic(msg)
 	}
 }
 

@@ -360,7 +360,7 @@ type skipListNode struct {
 }
 
 func (node *skipListNode) setNext(i int8, n *skipListNode) {
-	assert(i < node.level.maxLevel)
+	utils.Assert(i < node.level.maxLevel)
 	next := node.level.next[i]
 	node.level.next[i] = n
 	if n != nil {
@@ -369,7 +369,7 @@ func (node *skipListNode) setNext(i int8, n *skipListNode) {
 }
 
 func (node *skipListNode) next(i int8) *skipListNode {
-	assert(i < node.level.maxLevel)
+	utils.Assert(i < node.level.maxLevel)
 	return node.level.next[i]
 }
 
@@ -393,25 +393,25 @@ func (skl *SkipList) randLevel() int8 {
 			break
 		}
 	}
-	assert(height <= kMaxHeight)
+	utils.Assert(height <= kMaxHeight)
 	return height
 }
 
 func (node *skipListNode) KeyValue(kvData []byte) (key []byte, value []byte) {
-	assert(node.kvOffset < len(kvData))
+	utils.Assert(node.kvOffset < len(kvData))
 	key = kvData[node.kvOffset : node.kvOffset+node.keyLen]
 	value = kvData[node.kvOffset+node.keyLen : node.kvOffset+node.keyLen+node.valLen]
 	return
 }
 
 func (node *skipListNode) Key(kvData []byte) (key []byte) {
-	assert(node.kvOffset < len(kvData))
+	utils.Assert(node.kvOffset < len(kvData))
 	key = kvData[node.kvOffset : node.kvOffset+node.keyLen]
 	return
 }
 
 func (node *skipListNode) Value(kvData []byte) (key []byte) {
-	assert(node.kvOffset < len(kvData))
+	utils.Assert(node.kvOffset < len(kvData))
 	key = kvData[node.kvOffset+node.keyLen : node.kvOffset+node.keyLen+node.keyLen]
 	return
 }
