@@ -204,7 +204,7 @@ func remove(node *BTreeNode, key []byte, cmp comparer.BasicComparer) bool {
 
 				mostlyPrevious := prevSibling
 
-				// search mostly previous Key
+				// search mostly previous key
 				for !mostlyPrevious.isLeaf {
 					mostlyPrevious = mostlyPrevious.siblings[mostlyPrevious.num]
 				}

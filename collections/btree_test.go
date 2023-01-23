@@ -30,18 +30,18 @@ func TestBTree(t *testing.T) {
 	for i := uint8(0); i < size; i++ {
 		v, ok := tree.Get(insertList[i])
 		if !ok {
-			t.Fatalf("TestBTree_Get not ok, should be ok, Key=%d", insertList[i])
+			t.Fatalf("TestBTree_Get not ok, should be ok, key=%d", insertList[i])
 		}
-		t.Logf("TestBTree_Get ok, Key=%d, Value=%d", insertList[i], v)
+		t.Logf("TestBTree_Get ok, key=%d, value=%d", insertList[i], v)
 	}
 
 	for i := uint8(0); i < size; i++ {
 		ok := tree.Remove(insertList[i])
 		if !ok {
-			t.Fatalf("TestBTree_Remove not ok, should be ok, Key=%d", insertList[i])
+			t.Fatalf("TestBTree_Remove not ok, should be ok, key=%d", insertList[i])
 		}
 
-		t.Logf("TestBTree_Remove ok Key=%d", insertList[i])
+		t.Logf("TestBTree_Remove ok key=%d", insertList[i])
 		tree.BFS()
 	}
 
@@ -66,7 +66,7 @@ func TestBTree_Iterator(t *testing.T) {
 
 	iter := tree.NewIterator()
 	for iter.Next() {
-		fmt.Printf("Key=%d,Value=%d\n", iter.Key(), iter.Value())
+		fmt.Printf("key=%d,value=%d\n", iter.Key(), iter.Value())
 	}
 
 	for i := uint8(0); i < 20; i++ {
@@ -78,15 +78,15 @@ func TestBTree_Iterator(t *testing.T) {
 
 	iter.Reset()
 	for iter.Next() {
-		fmt.Printf("Key=%d,Value=%d\n", iter.Key(), iter.Value())
+		fmt.Printf("key=%d,value=%d\n", iter.Key(), iter.Value())
 	}
 
 	iter.Seek([]byte{100})
 
-	fmt.Printf("Key=%d,Value=%d\n", iter.Key(), iter.Value())
+	fmt.Printf("key=%d,value=%d\n", iter.Key(), iter.Value())
 
 	for iter.Next() {
-		fmt.Printf("Key=%d,Value=%d\n", iter.Key(), iter.Value())
+		fmt.Printf("key=%d,value=%d\n", iter.Key(), iter.Value())
 	}
 
 }

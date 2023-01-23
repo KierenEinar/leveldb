@@ -25,7 +25,7 @@ type SkipList struct {
 	length    int
 	kvSize    int
 
-	updatesScratch [kMaxHeight]*skipListNode
+	updateScratch [kMaxHeight]*skipListNode
 
 	comparer.BasicComparer
 	rwMutex sync.RWMutex
@@ -51,20 +51,20 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 	defer skl.rwMutex.Unlock()
 	n := skl.dummyHead
 	for i := skl.level - 1; i >= 0; i-- {
-		for n.next(i) != nil && skl.Compare(n.next(i).Key(skl.kvData), key) < 0 {
+		for n.next(i) != nil && skl.Compare(n.next(i).key(skl.kvData), key) < 0 {
 			n = n.next(i)
 		}
-		skl.updatesScratch[i] = n
+		skl.updateScratch[i] = n
 	}
 
-	updates := skl.updatesScratch
+	updates := skl.updateScratch
 
-	// if Key exists, just update the Value
-	if updates[0] != nil && skl.Compare(updates[0].next(0).Key(skl.kvData), key) == 0 {
+	// if key exists, just update the value
+	if updates[0] != nil && skl.Compare(updates[0].next(0).key(skl.kvData), key) == 0 {
 
 		replaceNode := updates[0].next(0)
 
-		// just replace the old Value
+		// just replace the old value
 		if replaceNode.valLen >= len(value) {
 			nodeKvData := skl.kvData[replaceNode.kvOffset+replaceNode.keyLen : replaceNode.kvOffset+replaceNode.keyLen+replaceNode.valLen]
 			m := copy(nodeKvData[:], value)
@@ -103,7 +103,7 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 		updates[l].setNext(l, newNode)
 	}
 
-	// update forward
+	// update backward
 	updateNextLevel0 := newNode.next(0)
 	if updateNextLevel0 != nil {
 		updateNextLevel0.backward = newNode
@@ -141,7 +141,7 @@ func (skl *SkipList) Del(key []byte) (updated bool, err error) {
 
 	updates := skl.findLT(key)
 
-	if skl.Compare(updates[0].next(0).Key(skl.kvData), key) != 0 {
+	if skl.Compare(updates[0].next(0).key(skl.kvData), key) != 0 {
 		updated = false
 		return
 	}
@@ -171,7 +171,7 @@ func (skl *SkipList) Del(key []byte) (updated bool, err error) {
 	}
 
 	skl.length--
-	skl.kvSize -= foundNode.size()
+	//skl.kvSize -= foundNode.size()
 	updated = true
 	return
 }
@@ -180,7 +180,7 @@ func (skl *SkipList) Get(key []byte) ([]byte, error) {
 	if n, found, err := skl.FindGreaterOrEqual(key); err != nil {
 		return nil, err
 	} else if found == true {
-		return n.Value(skl.kvData), nil
+		return n.value(skl.kvData), nil
 	}
 	return nil, errors.ErrNotFound
 }
@@ -197,9 +197,9 @@ func (skl *SkipList) FindGreaterOrEqual(key []byte) (*skipListNode, bool, error)
 		hitLevel int8 = -1
 	)
 	for i := skl.level - 1; i >= 0; i-- {
-		for ; n.next(i) != nil && skl.Compare(n.next(i).Key(skl.kvData), key) < 0; n = n.next(i) {
+		for ; n.next(i) != nil && skl.Compare(n.next(i).key(skl.kvData), key) < 0; n = n.next(i) {
 		}
-		if n.next(i) != nil && skl.Compare(n.next(i).Key(skl.kvData), key) == 0 {
+		if n.next(i) != nil && skl.Compare(n.next(i).key(skl.kvData), key) == 0 {
 			hitLevel = i
 			break
 		}
@@ -326,22 +326,22 @@ func (sklIter *SkipListIter) Key() []byte {
 	if sklIter.n == nil {
 		return nil
 	}
-	return sklIter.n.Key(sklIter.skl.kvData)
+	return sklIter.n.key(sklIter.skl.kvData)
 }
 
 func (sklIter *SkipListIter) Value() []byte {
 	if sklIter.n == nil {
 		return nil
 	}
-	return sklIter.n.Value(sklIter.skl.kvData)
+	return sklIter.n.value(sklIter.skl.kvData)
 }
 
 func (skl *SkipList) findLT(key []byte) []*skipListNode {
 
-	updates := skl.updatesScratch
+	updates := skl.updateScratch
 	n := skl.dummyHead
 	for i := skl.level - 1; i >= 0; i-- {
-		for n.next(i) != nil && skl.Compare(n.next(i).Key(skl.kvData), key) < 0 {
+		for n.next(i) != nil && skl.Compare(n.next(i).key(skl.kvData), key) < 0 {
 			n = n.next(i)
 		}
 		updates[i] = n
@@ -397,21 +397,32 @@ func (skl *SkipList) randLevel() int8 {
 	return height
 }
 
-func (node *skipListNode) KeyValue(kvData []byte) (key []byte, value []byte) {
+func (skl *SkipList) KeyValue(node *skipListNode) (key []byte, value []byte) {
+	key = skl.Key(node)
+	value = skl.Value(node)
+	return
+}
+
+func (skl *SkipList) Key(node *skipListNode) (key []byte) {
+	utils.Assert(node.kvOffset < len(skl.kvData))
+	key = skl.kvData[node.kvOffset : node.kvOffset+node.keyLen]
+	return
+}
+
+func (skl *SkipList) Value(node *skipListNode) (value []byte) {
+	utils.Assert(node.kvOffset < len(skl.kvData))
+	value = skl.kvData[node.kvOffset+node.keyLen : node.kvOffset+node.keyLen+node.valLen]
+	return
+}
+
+func (node *skipListNode) key(kvData []byte) (key []byte) {
 	utils.Assert(node.kvOffset < len(kvData))
 	key = kvData[node.kvOffset : node.kvOffset+node.keyLen]
+	return
+}
+
+func (node *skipListNode) value(kvData []byte) (value []byte) {
+	utils.Assert(node.kvOffset < len(kvData))
 	value = kvData[node.kvOffset+node.keyLen : node.kvOffset+node.keyLen+node.valLen]
-	return
-}
-
-func (node *skipListNode) Key(kvData []byte) (key []byte) {
-	utils.Assert(node.kvOffset < len(kvData))
-	key = kvData[node.kvOffset : node.kvOffset+node.keyLen]
-	return
-}
-
-func (node *skipListNode) Value(kvData []byte) (key []byte) {
-	utils.Assert(node.kvOffset < len(kvData))
-	key = kvData[node.kvOffset+node.keyLen : node.kvOffset+node.keyLen+node.keyLen]
 	return
 }
