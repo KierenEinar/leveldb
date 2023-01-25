@@ -24,12 +24,12 @@ func NewMemTable(capacity int, cmp comparer.BasicComparer) *MemDB {
 }
 
 func (memTable *MemDB) Put(ukey []byte, sequence Sequence, value []byte) error {
-	ikey := BuildInternalKey(nil, ukey, KeyTypeValue, sequence)
+	ikey := buildInternalKey(nil, ukey, KeyTypeValue, sequence)
 	return memTable.SkipList.Put(ikey, value)
 }
 
 func (memTable *MemDB) Del(ukey []byte, sequence Sequence) error {
-	ikey := BuildInternalKey(nil, ukey, KeyTypeDel, sequence)
+	ikey := buildInternalKey(nil, ukey, KeyTypeDel, sequence)
 	return memTable.SkipList.Put(ikey, nil)
 }
 
@@ -45,7 +45,7 @@ func (memTable *MemDB) Find(ikey InternalKey) (rkey []byte, value []byte, err er
 		if err != nil {
 			return nil, nil, err
 		}
-		if bytes.Compare(ukey, ikey.UserKey()) == 0 {
+		if bytes.Compare(ukey, ikey.userKey()) == 0 {
 			rkey = ikeyN
 			if kt == KeyTypeDel {
 				err = errors.ErrKeyDel

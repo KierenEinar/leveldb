@@ -92,7 +92,7 @@ func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
 	seq := dbImpl.seqNum
 	dbImpl.rwMutex.RUnlock()
 
-	ikey := BuildInternalKey(nil, key, KeyTypeSeek, seq)
+	ikey := buildInternalKey(nil, key, KeyTypeSeek, seq)
 	var (
 		mErr  error
 		value []byte

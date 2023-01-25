@@ -35,14 +35,14 @@ func (ik InternalKey) assert() {
 	utils.Assert(err == nil, fmt.Sprintf("internal key parse failed, err=%v", err))
 }
 
-func (ik InternalKey) UserKey() []byte {
+func (ik InternalKey) userKey() []byte {
 	ik.assert()
 	dst := make([]byte, len(ik)-8)
 	copy(dst, ik[:len(ik)-8])
 	return dst
 }
 
-func (ik InternalKey) Seq() Sequence {
+func (ik InternalKey) seq() Sequence {
 	ik.assert()
 	x := binary.LittleEndian.Uint64(ik[len(ik)-8:])
 	return Sequence(x >> 8)
@@ -71,7 +71,7 @@ func parseInternalKey(ikey InternalKey) (ukey []byte, kt KeyType, seq uint64, er
 	return
 }
 
-func BuildInternalKey(dst, uKey []byte, kt KeyType, sequence Sequence) InternalKey {
+func buildInternalKey(dst, uKey []byte, kt KeyType, sequence Sequence) InternalKey {
 	dst = utils.EnsureBuffer(dst, len(dst)+8)
 	n := copy(dst, uKey)
 	binary.LittleEndian.PutUint64(dst[n:], (uint64(sequence)<<8)|uint64(kt))

@@ -654,7 +654,7 @@ const (
 
 func (v *Version) get(ikey InternalKey, value *[]byte) (err error) {
 
-	userKey := ikey.UserKey()
+	userKey := ikey.userKey()
 	stat := kStatNotFound
 
 	match := func(level int, tFile tFile) bool {
@@ -714,9 +714,9 @@ func (v *Version) get(ikey InternalKey, value *[]byte) (err error) {
 
 func (v *Version) foreachOverlapping(ikey InternalKey, f func(level int, tFile tFile) bool) {
 	tmp := make([]tFile, 0)
-	ukey := ikey.UserKey()
+	ukey := ikey.userKey()
 	for _, level0 := range v.levels[0] {
-		if bytes.Compare(level0.iMin.UserKey(), ukey) <= 0 && bytes.Compare(level0.iMax.UserKey(), ukey) >= 0 {
+		if bytes.Compare(level0.iMin.userKey(), ukey) <= 0 && bytes.Compare(level0.iMax.userKey(), ukey) >= 0 {
 			tmp = append(tmp, level0)
 		}
 	}
@@ -733,9 +733,9 @@ func (v *Version) foreachOverlapping(ikey InternalKey, f func(level int, tFile t
 	for level := 1; level < len(v.levels); level++ {
 		lf := v.levels[level]
 		idx := sort.Search(len(lf), func(i int) bool {
-			return bytes.Compare(lf[i].iMax.UserKey(), ukey) >= 0
+			return bytes.Compare(lf[i].iMax.userKey(), ukey) >= 0
 		})
-		if idx < len(lf) && bytes.Compare(lf[idx].iMin.UserKey(), ukey) <= 0 {
+		if idx < len(lf) && bytes.Compare(lf[idx].iMin.userKey(), ukey) <= 0 {
 			if !f(level, lf[idx]) {
 				return
 			}

@@ -55,7 +55,7 @@ func (sf tFiles) size() (size int) {
 type Levels [options.KLevelNum]tFiles
 
 func (s tFile) isOverlapped(umin []byte, umax []byte) bool {
-	smin, smax := s.iMin.UserKey(), s.iMax.UserKey()
+	smin, smax := s.iMin.userKey(), s.iMax.userKey()
 	return !(bytes.Compare(smax, umin) < 0) && !(bytes.Compare(smin, umax) > 0)
 }
 
@@ -64,31 +64,31 @@ func (s tFiles) getOverlapped(imin InternalKey, imax InternalKey, overlapped boo
 	if !overlapped {
 
 		var (
-			umin, umax        = imin.UserKey(), imax.UserKey()
+			umin, umax        = imin.userKey(), imax.userKey()
 			smallest, largest int
 			sizeS             = len(s)
 		)
 
 		// use binary search begin
 		n := sort.Search(sizeS, func(i int) bool {
-			return bytes.Compare(s[i].iMin.UserKey(), umin) >= 0
+			return bytes.Compare(s[i].iMin.userKey(), umin) >= 0
 		})
 
 		if n == 0 {
 			smallest = 0
-		} else if bytes.Compare(s[n-1].iMax.UserKey(), umin) >= 0 {
+		} else if bytes.Compare(s[n-1].iMax.userKey(), umin) >= 0 {
 			smallest = n - 1
 		} else {
 			smallest = sizeS
 		}
 
 		n = sort.Search(sizeS, func(i int) bool {
-			return bytes.Compare(s[i].iMax.UserKey(), umax) >= 0
+			return bytes.Compare(s[i].iMax.userKey(), umax) >= 0
 		})
 
 		if n == sizeS {
 			largest = sizeS
-		} else if bytes.Compare(s[n].iMin.UserKey(), umax) >= 0 {
+		} else if bytes.Compare(s[n].iMin.userKey(), umax) >= 0 {
 			largest = n + 1
 		} else {
 			largest = n
@@ -106,18 +106,18 @@ func (s tFiles) getOverlapped(imin InternalKey, imax InternalKey, overlapped boo
 	var (
 		i          = 0
 		restart    = false
-		umin, umax = imin.UserKey(), imax.UserKey()
+		umin, umax = imin.userKey(), imax.userKey()
 	)
 
 	for i < len(s) {
 		sFile := s[i]
 		if sFile.isOverlapped(umin, umax) {
-			if bytes.Compare(sFile.iMax.UserKey(), umax) > 0 {
-				umax = sFile.iMax.UserKey()
+			if bytes.Compare(sFile.iMax.userKey(), umax) > 0 {
+				umax = sFile.iMax.userKey()
 				restart = true
 			}
-			if bytes.Compare(sFile.iMin.UserKey(), umin) < 0 {
-				umin = sFile.iMin.UserKey()
+			if bytes.Compare(sFile.iMin.userKey(), umin) < 0 {
+				umin = sFile.iMin.userKey()
 				restart = true
 			}
 			if restart {

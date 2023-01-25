@@ -130,15 +130,15 @@ func (c *compaction1) expand() {
 
 func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax InternalKey, overlapped bool) {
 
-	umin := imin.UserKey()
-	umax := imax.UserKey()
+	umin := imin.userKey()
+	umax := imax.userKey()
 
 	if overlapped {
 		i := 0
 		for ; i < len(tFiles); i++ {
 			if tFiles[i].overlapped1(imin, imax) {
-				tMinR := bytes.Compare(tFiles[i].iMin.UserKey(), umin)
-				tMaxR := bytes.Compare(tFiles[i].iMax.UserKey(), umax)
+				tMinR := bytes.Compare(tFiles[i].iMin.userKey(), umin)
+				tMaxR := bytes.Compare(tFiles[i].iMax.userKey(), umax)
 
 				if tMinR >= 0 && tMaxR <= 0 {
 					*dst = append(*dst, tFiles[i])
@@ -146,10 +146,10 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax Internal
 					i = 0
 					*dst = (*dst)[:0]
 					if tMinR < 0 {
-						umin = tFiles[i].iMin.UserKey()
+						umin = tFiles[i].iMin.userKey()
 					}
 					if tMaxR > 0 {
-						umax = tFiles[i].iMax.UserKey()
+						umax = tFiles[i].iMax.userKey()
 					}
 				}
 			}
@@ -162,24 +162,24 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax Internal
 		)
 
 		idx := sort.Search(len(tFiles), func(i int) bool {
-			return bytes.Compare(tFiles[i].iMin.UserKey(), umin) <= 0
+			return bytes.Compare(tFiles[i].iMin.userKey(), umin) <= 0
 		})
 
 		if idx == 0 {
 			begin = 0
-		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMax.UserKey(), umin) <= 0 {
+		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMax.userKey(), umin) <= 0 {
 			begin -= 1
 		} else {
 			begin = idx
 		}
 
 		idx = sort.Search(len(tFiles), func(i int) bool {
-			return bytes.Compare(tFiles[i].iMax.UserKey(), umax) >= 0
+			return bytes.Compare(tFiles[i].iMax.userKey(), umax) >= 0
 		})
 
 		if idx == len(tFiles) {
 			end = idx
-		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMin.UserKey(), umax) <= 0 {
+		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMin.userKey(), umax) <= 0 {
 			end = idx + 1
 		} else {
 			end = idx
@@ -192,8 +192,8 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax Internal
 }
 
 func (tFile tFile) overlapped1(imin InternalKey, imax InternalKey) bool {
-	if bytes.Compare(tFile.iMax.UserKey(), imin.UserKey()) < 0 ||
-		bytes.Compare(tFile.iMin.UserKey(), imax.UserKey()) > 0 {
+	if bytes.Compare(tFile.iMax.userKey(), imin.userKey()) < 0 ||
+		bytes.Compare(tFile.iMin.userKey(), imax.userKey()) > 0 {
 		return false
 	}
 	return true
@@ -268,7 +268,7 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 			drop = false
 		} else {
 			// ukey first occur
-			if lastIKey == nil || bytes.Compare(lastIKey.UserKey(), uk) != 0 {
+			if lastIKey == nil || bytes.Compare(lastIKey.userKey(), uk) != 0 {
 				lastSeq = Sequence(kMaxSequenceNum)
 				lastIKey = inputKey
 			}
@@ -405,9 +405,9 @@ func (c *compaction1) isBaseLevelForKey(input InternalKey) bool {
 
 		for c.baseLevelI[levelI] < len(level) {
 			table := level[c.baseLevelI[levelI]]
-			if bytes.Compare(input.UserKey(), table.iMax.UserKey()) > 0 {
+			if bytes.Compare(input.userKey(), table.iMax.userKey()) > 0 {
 				c.baseLevelI[levelI]++
-			} else if bytes.Compare(input.UserKey(), table.iMin.UserKey()) < 0 {
+			} else if bytes.Compare(input.userKey(), table.iMin.userKey()) < 0 {
 				break
 			} else {
 				return false
