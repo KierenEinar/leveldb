@@ -657,7 +657,7 @@ func (v *Version) get(ikey internalKey, value *[]byte) (err error) {
 	userKey := ikey.userKey()
 	stat := kStatNotFound
 
-	match := func(level int, tFile tFile) bool {
+	match := func(level int, tFile tFile) (continueLoop bool) {
 		getErr := v.vSet.tableCache.Get(ikey, tFile, func(rkey internalKey, rValue []byte, rErr error) {
 			if rErr == errors.ErrNotFound {
 				stat = kStatNotFound
@@ -712,7 +712,7 @@ func (v *Version) get(ikey internalKey, value *[]byte) (err error) {
 	return
 }
 
-func (v *Version) foreachOverlapping(ikey internalKey, f func(level int, tFile tFile) bool) {
+func (v *Version) foreachOverlapping(ikey internalKey, f func(level int, tFile tFile) (continueLoop bool)) {
 	tmp := make([]tFile, 0)
 	ukey := ikey.userKey()
 	for _, level0 := range v.levels[0] {

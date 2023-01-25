@@ -10,7 +10,6 @@ import (
 )
 
 type MemDB struct {
-	cmp comparer.BasicComparer
 	*collections.SkipList
 	*utils.BasicReleaser
 }
@@ -43,7 +42,7 @@ func (memTable *MemDB) Find(ikey internalKey) (rkey []byte, value []byte, err er
 		ikeyN := memTable.SkipList.Key(node)
 		ukey, kt, _, err := parseInternalKey(ikeyN)
 		if err != nil {
-			return nil, nil, err
+			return
 		}
 		if bytes.Compare(ukey, ikey.userKey()) == 0 {
 			rkey = ikeyN

@@ -18,6 +18,7 @@ type TableCache struct {
 
 func (c *TableCache) Close() {
 	c.cache.Close()
+	runtime.SetFinalizer(c, nil)
 }
 
 func newTableCache(opt *options.Options) *TableCache {

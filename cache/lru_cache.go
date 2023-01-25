@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-const htInitSlots = uint32(1 << 2)
+const htInitSlots = uint32(1 << 5)
 
 type Cache interface {
 	Insert(key []byte, charge uint32, value interface{}, deleter func(key []byte, value interface{})) *LRUHandle
@@ -255,9 +255,12 @@ func (c *LRUCache) finishErase(h *LRUHandle) {
 func (c *LRUCache) UnRef(h *LRUHandle) {
 
 	utils.Assert(h.ref > 0)
+	utils.AssertMutexHeld(&c.rwMutex)
 	h.ref--
 	if h.ref == 0 {
-		h.deleter(h.key, h.value)
+		c.rwMutex.Unlock()
+		h.deleter(h.key, h.value) // may cost expensive time
+		c.rwMutex.Lock()
 	} else if h.ref == 1 && h.inCache {
 		lruRemove(h)
 		lruAppend(&c.lru, h)
@@ -276,6 +279,7 @@ const kNumShardBits = 4
 
 type ShardedLRUCache struct {
 	caches [1 << kNumShardBits]*LRUCache
+	mutex  sync.Mutex
 	hash32 hash2.Hash32
 }
 
@@ -301,17 +305,20 @@ func (c *ShardedLRUCache) Close() {
 func (c *ShardedLRUCache) Insert(key []byte, charge uint32,
 	value interface{}, deleter func(key []byte, value interface{})) *LRUHandle {
 	hash := c.hash(key)
-	return c.caches[hash].Insert(key, hash, charge, value, deleter)
+	slot := hash & (1<<kNumShardBits - 1)
+	return c.caches[slot].Insert(key, hash, charge, value, deleter)
 }
 
 func (c *ShardedLRUCache) Lookup(key []byte) *LRUHandle {
 	hash := c.hash(key)
-	return c.caches[hash].Lookup(key, hash)
+	slot := hash & (1<<kNumShardBits - 1)
+	return c.caches[slot].Lookup(key, hash)
 }
 
 func (c *ShardedLRUCache) Erase(key []byte) *LRUHandle {
 	hash := c.hash(key)
-	return c.caches[hash].Erase(key, hash)
+	slot := hash & (1<<kNumShardBits - 1)
+	return c.caches[slot].Erase(key, hash)
 }
 
 func (c *ShardedLRUCache) Prune() {
@@ -321,9 +328,11 @@ func (c *ShardedLRUCache) Prune() {
 }
 
 func (c *ShardedLRUCache) hash(key []byte) uint32 {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.hash32.Reset()
 	_, _ = c.hash32.Write(key)
-	return c.hash32.Sum32() & (1<<kNumShardBits - 1)
+	return c.hash32.Sum32()
 }
 
 func (c *ShardedLRUCache) UnRef(h *LRUHandle) {
