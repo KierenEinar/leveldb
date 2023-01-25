@@ -30,7 +30,7 @@ func newTableCache(opt *options.Options) *TableCache {
 	return c
 }
 
-func (c *TableCache) Get(ikey InternalKey, tFile tFile, f func(rkey InternalKey, value []byte, err error)) error {
+func (c *TableCache) Get(ikey internalKey, tFile tFile, f func(rkey internalKey, value []byte, err error)) error {
 	var cacheHandle *cache.LRUHandle
 	if err := c.findTable(tFile, &cacheHandle); err != nil {
 		return err

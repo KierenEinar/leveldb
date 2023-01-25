@@ -7,14 +7,14 @@ import (
 	"leveldb/utils"
 )
 
-type Sequence uint64
+type sequence uint64
 
-type KeyType uint8
+type keyType uint8
 
 const (
-	KeyTypeValue KeyType = 0
-	KeyTypeDel   KeyType = 1
-	KeyTypeSeek          = KeyTypeValue
+	keyTypeValue keyType = 0
+	keyTypeDel   keyType = 1
+	keyTypeSeek          = keyTypeValue
 )
 
 var (
@@ -22,40 +22,40 @@ var (
 )
 
 const kMaxSequenceNum = (uint64(1) << 56) - 1
-const kMaxNum = kMaxSequenceNum | uint64(KeyTypeValue)
+const kMaxNum = kMaxSequenceNum | uint64(keyTypeValue)
 
 func init() {
 	binary.PutUvarint(kMaxNumBytes, kMaxNum)
 }
 
-type InternalKey []byte
+type internalKey []byte
 
-func (ik InternalKey) assert() {
+func (ik internalKey) assert() {
 	_, _, _, err := parseInternalKey(ik)
 	utils.Assert(err == nil, fmt.Sprintf("internal key parse failed, err=%v", err))
 }
 
-func (ik InternalKey) userKey() []byte {
+func (ik internalKey) userKey() []byte {
 	ik.assert()
 	dst := make([]byte, len(ik)-8)
 	copy(dst, ik[:len(ik)-8])
 	return dst
 }
 
-func (ik InternalKey) seq() Sequence {
+func (ik internalKey) seq() sequence {
 	ik.assert()
 	x := binary.LittleEndian.Uint64(ik[len(ik)-8:])
-	return Sequence(x >> 8)
+	return sequence(x >> 8)
 }
 
-func (ik InternalKey) KeyType() KeyType {
+func (ik internalKey) keyType() keyType {
 	ik.assert()
 	x := binary.LittleEndian.Uint64(ik[len(ik)-8:])
 	kt := uint8(x & 1 << 7)
-	return KeyType(kt)
+	return keyType(kt)
 }
 
-func parseInternalKey(ikey InternalKey) (ukey []byte, kt KeyType, seq uint64, err error) {
+func parseInternalKey(ikey internalKey) (ukey []byte, kt keyType, seq uint64, err error) {
 	if len(ikey) < 8 {
 		err = errors.NewErrCorruption("invalid internal ikey len")
 		return
@@ -63,15 +63,15 @@ func parseInternalKey(ikey InternalKey) (ukey []byte, kt KeyType, seq uint64, er
 
 	num := binary.LittleEndian.Uint64(ikey[len(ikey)-8:])
 	seq, kty := num>>8, num&0xff
-	kt = KeyType(kty)
-	if kt > KeyTypeDel {
+	kt = keyType(kty)
+	if kt > keyTypeDel {
 		err = errors.NewErrCorruption("invalid internal ikey keytype")
 		return
 	}
 	return
 }
 
-func buildInternalKey(dst, uKey []byte, kt KeyType, sequence Sequence) InternalKey {
+func buildInternalKey(dst, uKey []byte, kt keyType, sequence sequence) internalKey {
 	dst = utils.EnsureBuffer(dst, len(dst)+8)
 	n := copy(dst, uKey)
 	binary.LittleEndian.PutUint64(dst[n:], (uint64(sequence)<<8)|uint64(kt))

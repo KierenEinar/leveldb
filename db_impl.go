@@ -27,10 +27,10 @@ type DBImpl struct {
 	shutdown uint32
 	closed   chan struct{}
 	// these state are protect by mutex
-	seqNum    Sequence
+	seqNum    sequence
 	journalFd storage.Fd
 
-	frozenSeq       Sequence
+	frozenSeq       sequence
 	frozenJournalFd storage.Fd
 
 	mem *MemDB
@@ -92,7 +92,7 @@ func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
 	seq := dbImpl.seqNum
 	dbImpl.rwMutex.RUnlock()
 
-	ikey := buildInternalKey(nil, key, KeyTypeSeek, seq)
+	ikey := buildInternalKey(nil, key, keyTypeSeek, seq)
 	var (
 		mErr  error
 		value []byte
@@ -121,7 +121,7 @@ func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
 	return value, nil
 }
 
-func memGet(mem *MemDB, ikey InternalKey, value *[]byte, err *error) (ok bool) {
+func memGet(mem *MemDB, ikey internalKey, value *[]byte, err *error) (ok bool) {
 
 	_, rValue, rErr := mem.Find(ikey)
 	if rErr != nil {
@@ -176,7 +176,7 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	if err == nil {
 		newWriteBatch, lastWriter = dbImpl.mergeWriteBatch() // write into scratchbatch
 		newWriteBatch.SetSequence(lastSequence + 1)
-		lastSequence += Sequence(newWriteBatch.Len())
+		lastSequence += sequence(newWriteBatch.Len())
 		mem := dbImpl.mem
 		mem.Ref()
 		dbImpl.rwMutex.Unlock()
@@ -272,7 +272,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 				dbImpl.versionSet.reuseFileNum(journalFd.Num)
 				return err
 			}
-			dbImpl.MaybeScheduleCompaction()
+			dbImpl.maybeScheduleCompaction()
 		}
 	}
 
@@ -339,8 +339,8 @@ func (dbImpl *DBImpl) recordBackgroundError(err error) {
 	}
 }
 
-// MaybeScheduleCompaction required mutex held
-func (dbImpl *DBImpl) MaybeScheduleCompaction() {
+// maybeScheduleCompaction required mutex held
+func (dbImpl *DBImpl) maybeScheduleCompaction() {
 	utils.AssertMutexHeld(&dbImpl.rwMutex)
 
 	if dbImpl.backgroundCompactionScheduled {
@@ -378,7 +378,7 @@ func (dbImpl *DBImpl) backgroundCall() {
 	}
 
 	dbImpl.backgroundCompactionScheduled = false
-	dbImpl.MaybeScheduleCompaction()
+	dbImpl.maybeScheduleCompaction()
 
 	dbImpl.backgroundWorkFinishedSignal.Broadcast()
 	dbImpl.rwMutex.Unlock()
@@ -491,58 +491,6 @@ func (dbImpl *DBImpl) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err err
 		fileMeta = tWriter.fileMeta
 		edit.addNewTable(0, fileMeta.size, uint64(fileMeta.fd), fileMeta.iMin, fileMeta.iMax)
 	}
-	return
-}
-
-func Open(dbpath string, option *options.Options) (db DB, err error) {
-	opt, err := sanitizeOptions(dbpath, option)
-	if err != nil {
-		return
-	}
-
-	dbImpl := newDBImpl(opt)
-	dbImpl.rwMutex.Lock()
-	defer dbImpl.rwMutex.Unlock()
-	edit := VersionEdit{}
-	err = dbImpl.recover(&edit)
-	if err != nil {
-		return
-	}
-
-	if dbImpl.mem == nil {
-		memDB := NewMemTable(0, opt.InternalComparer)
-		memDB.Ref()
-		dbImpl.mem = memDB
-
-		journalFd := storage.Fd{
-			FileType: storage.KJournalFile,
-			Num:      dbImpl.versionSet.allocFileNum(),
-		}
-		sequentialWriter, err := dbImpl.opt.Storage.NewAppendableFile(journalFd)
-		if err != nil {
-			return
-		}
-
-		dbImpl.journalFd = journalFd
-		dbImpl.journalWriter = wal.NewJournalWriter(sequentialWriter)
-		edit.setLogNum(dbImpl.journalFd.Num)
-		err = dbImpl.versionSet.logAndApply(&edit, &dbImpl.rwMutex)
-		if err != nil {
-			return
-		}
-	}
-
-	for _, v := range edit.addedTables {
-		delete(dbImpl.pendingOutputs, v.number)
-	}
-
-	err = dbImpl.removeObsoleteFiles()
-	if err != nil {
-		//todo warm log
-		err = nil
-	}
-	dbImpl.MaybeScheduleCompaction()
-	db = dbImpl
 	return
 }
 
@@ -697,7 +645,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 				return err
 			}
 
-			dbImpl.seqNum += writeBatch.seq + Sequence(writeBatch.count) - 1
+			dbImpl.seqNum += writeBatch.seq + sequence(writeBatch.count) - 1
 			dbImpl.versionSet.markFileUsed(fd.Num)
 		}
 

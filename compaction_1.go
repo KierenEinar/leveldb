@@ -28,7 +28,7 @@ type compaction1 struct {
 
 	opt            *options.Options
 	outputs        map[uint64]struct{}
-	minSeq         Sequence
+	minSeq         sequence
 	tWriter        *tWriter
 	tableOperation *tableOperation
 	tableCache     *TableCache
@@ -128,7 +128,7 @@ func (c *compaction1) expand() {
 
 }
 
-func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax InternalKey, overlapped bool) {
+func (tFiles tFiles) getOverlapped1(dst *tFiles, imin internalKey, imax internalKey, overlapped bool) {
 
 	umin := imin.userKey()
 	umax := imax.userKey()
@@ -191,7 +191,7 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin InternalKey, imax Internal
 
 }
 
-func (tFile tFile) overlapped1(imin InternalKey, imax InternalKey) bool {
+func (tFile tFile) overlapped1(imin internalKey, imax internalKey) bool {
 	if bytes.Compare(tFile.iMax.userKey(), imin.userKey()) < 0 ||
 		bytes.Compare(tFile.iMin.userKey(), imax.userKey()) > 0 {
 		return false
@@ -199,7 +199,7 @@ func (tFile tFile) overlapped1(imin InternalKey, imax InternalKey) bool {
 	return true
 }
 
-func (tFiles tFiles) getRange1(cmp comparer.Comparer) (imin, imax InternalKey) {
+func (tFiles tFiles) getRange1(cmp comparer.Comparer) (imin, imax internalKey) {
 	for _, tFile := range tFiles {
 		if cmp.Compare(tFile.iMin, imin) < 0 {
 			imin = tFile.iMin
@@ -224,7 +224,7 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 	if dbImpl.snapshots.Len() == 0 {
 		c.minSeq = dbImpl.seqNum
 	} else {
-		c.minSeq = dbImpl.snapshots.Front().Value.(Sequence)
+		c.minSeq = dbImpl.snapshots.Front().Value.(sequence)
 	}
 
 	dbImpl.rwMutex.Unlock()
@@ -238,8 +238,8 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 
 	var (
 		drop     bool
-		lastIKey InternalKey
-		lastSeq  Sequence
+		lastIKey internalKey
+		lastSeq  sequence
 	)
 
 	for iter.Next() && iter.Valid() == nil && atomic.LoadUint32(&dbImpl.shutdown) == 0 {
@@ -269,20 +269,20 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 		} else {
 			// ukey first occur
 			if lastIKey == nil || bytes.Compare(lastIKey.userKey(), uk) != 0 {
-				lastSeq = Sequence(kMaxSequenceNum)
+				lastSeq = sequence(kMaxSequenceNum)
 				lastIKey = inputKey
 			}
 			if lastSeq > c.minSeq {
 				drop = false
-				if kt == KeyTypeValue {
+				if kt == keyTypeValue {
 
-				} else if kt == KeyTypeDel && Sequence(seq) < c.minSeq && c.isBaseLevelForKey(inputKey) {
+				} else if kt == keyTypeDel && sequence(seq) < c.minSeq && c.isBaseLevelForKey(inputKey) {
 					drop = true
 				}
 			} else {
 				drop = true
 			}
-			lastSeq = Sequence(seq)
+			lastSeq = sequence(seq)
 		}
 
 		if drop {
@@ -369,7 +369,7 @@ func (c *compaction1) makeInputIterator() (iter iterator.Iterator, err error) {
 	return
 }
 
-func (c *compaction1) shouldStopBefore(nextKey InternalKey) bool {
+func (c *compaction1) shouldStopBefore(nextKey internalKey) bool {
 
 	for c.inputOverlappedGPIndex < len(c.gp) {
 		if c.opt.InternalComparer.Compare(nextKey, c.gp[c.inputOverlappedGPIndex].iMax) > 0 {
@@ -399,7 +399,7 @@ func (dbImpl *DBImpl) finishCompactionOutputFile(c *compaction1) error {
 	return nil
 }
 
-func (c *compaction1) isBaseLevelForKey(input InternalKey) bool {
+func (c *compaction1) isBaseLevelForKey(input internalKey) bool {
 	for levelI := c.sourceLevel + 2; levelI < len(c.levels); levelI++ {
 		level := c.levels[levelI]
 

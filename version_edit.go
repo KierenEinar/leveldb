@@ -22,7 +22,7 @@ type VersionEdit struct {
 	comparerName []byte
 	journalNum   uint64
 	nextFileNum  uint64
-	lastSeq      Sequence
+	lastSeq      sequence
 	compactPtrs  []compactPtr
 	delTables    []delTable
 	addedTables  []addTable
@@ -43,7 +43,7 @@ func (edit *VersionEdit) reset() {
 
 type compactPtr struct {
 	level int
-	ikey  InternalKey
+	ikey  internalKey
 }
 
 type delTable struct {
@@ -55,8 +55,8 @@ type addTable struct {
 	level  int
 	size   int
 	number uint64
-	imin   InternalKey
-	imax   InternalKey
+	imin   internalKey
+	imax   internalKey
 }
 
 func (edit *VersionEdit) hasRec(bitPos uint8) bool {
@@ -83,12 +83,12 @@ func (edit *VersionEdit) setNextFile(nextFileNum uint64) {
 	edit.nextFileNum = nextFileNum
 }
 
-func (edit *VersionEdit) setLastSeq(seq Sequence) {
+func (edit *VersionEdit) setLastSeq(seq sequence) {
 	edit.setRec(kSeqNum)
 	edit.lastSeq = seq
 }
 
-func (edit *VersionEdit) addCompactPtr(level int, ikey InternalKey) {
+func (edit *VersionEdit) addCompactPtr(level int, ikey internalKey) {
 	edit.setRec(kCompact)
 	edit.compactPtrs = append(edit.compactPtrs, compactPtr{
 		level: level,
@@ -104,7 +104,7 @@ func (edit *VersionEdit) addDelTable(level int, number uint64) {
 	})
 }
 
-func (edit *VersionEdit) addNewTable(level, size int, fileNumber uint64, imin, imax InternalKey) {
+func (edit *VersionEdit) addNewTable(level, size int, fileNumber uint64, imin, imax internalKey) {
 	edit.setRec(kAddTable)
 	edit.addedTables = append(edit.addedTables, addTable{
 		level:  level,
@@ -200,7 +200,7 @@ func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
 			if edit.err != nil {
 				return
 			}
-			edit.lastSeq = Sequence(seqNum)
+			edit.lastSeq = sequence(seqNum)
 		case kCompact:
 			level := edit.readVarInt(src)
 			ikey := edit.readBytes(src)

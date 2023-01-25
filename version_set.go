@@ -25,7 +25,7 @@ type VersionSet struct {
 	comparerName   []byte
 	nextFileNum    uint64
 	stJournalNum   uint64
-	stSeqNum       Sequence // current memtable start seq num
+	stSeqNum       sequence // current memtable start seq num
 	manifestFd     storage.Fd
 	manifestWriter *wal.JournalWriter
 	writer         storage.SequentialWriter
@@ -518,7 +518,7 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	var (
 		hasComparerName, hasLogFileNum, hasNextFileNum, hasLastSeq bool
 		logFileNum                                                 uint64
-		seqNum                                                     Sequence
+		seqNum                                                     sequence
 		nextFileNum                                                uint64
 	)
 
@@ -652,13 +652,13 @@ const (
 	kStatCorruption
 )
 
-func (v *Version) get(ikey InternalKey, value *[]byte) (err error) {
+func (v *Version) get(ikey internalKey, value *[]byte) (err error) {
 
 	userKey := ikey.userKey()
 	stat := kStatNotFound
 
 	match := func(level int, tFile tFile) bool {
-		getErr := v.vSet.tableCache.Get(ikey, tFile, func(rkey InternalKey, rValue []byte, rErr error) {
+		getErr := v.vSet.tableCache.Get(ikey, tFile, func(rkey internalKey, rValue []byte, rErr error) {
 			if rErr == errors.ErrNotFound {
 				stat = kStatNotFound
 			}
@@ -667,10 +667,10 @@ func (v *Version) get(ikey InternalKey, value *[]byte) (err error) {
 				stat = kStatCorruption
 			} else if bytes.Compare(ukey, userKey) == 0 {
 				switch kt {
-				case KeyTypeValue:
+				case keyTypeValue:
 					*value = rValue
 					stat = kStatFound
-				case KeyTypeDel:
+				case keyTypeDel:
 					stat = kStatDelete
 				}
 			}
@@ -712,7 +712,7 @@ func (v *Version) get(ikey InternalKey, value *[]byte) (err error) {
 	return
 }
 
-func (v *Version) foreachOverlapping(ikey InternalKey, f func(level int, tFile tFile) bool) {
+func (v *Version) foreachOverlapping(ikey internalKey, f func(level int, tFile tFile) bool) {
 	tmp := make([]tFile, 0)
 	ukey := ikey.userKey()
 	for _, level0 := range v.levels[0] {
@@ -765,7 +765,7 @@ func (vSet *VersionSet) markFileUsed(fileNum uint64) bool {
 	return false
 }
 
-func (vSet *VersionSet) loadCompactPtr(level int) InternalKey {
+func (vSet *VersionSet) loadCompactPtr(level int) internalKey {
 	if level < len(vSet.compactPtrs) {
 		return nil
 	}

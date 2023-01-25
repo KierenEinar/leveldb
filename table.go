@@ -15,8 +15,8 @@ import (
 
 type tFile struct {
 	fd         int
-	iMax       InternalKey
-	iMin       InternalKey
+	iMax       internalKey
+	iMin       internalKey
 	size       int
 	allowSeeks int
 }
@@ -59,7 +59,7 @@ func (s tFile) isOverlapped(umin []byte, umax []byte) bool {
 	return !(bytes.Compare(smax, umin) < 0) && !(bytes.Compare(smin, umax) > 0)
 }
 
-func (s tFiles) getOverlapped(imin InternalKey, imax InternalKey, overlapped bool) (dst tFiles) {
+func (s tFiles) getOverlapped(imin internalKey, imax internalKey, overlapped bool) (dst tFiles) {
 
 	if !overlapped {
 
@@ -165,10 +165,10 @@ type tWriter struct {
 	fileMeta    tFile
 	tw          *table.Writer
 	tableCache  *TableCache
-	first, last InternalKey
+	first, last internalKey
 }
 
-func (t *tWriter) append(ikey InternalKey, value []byte) error {
+func (t *tWriter) append(ikey internalKey, value []byte) error {
 	if t.first == nil {
 		t.first = append([]byte(nil), ikey...)
 	}

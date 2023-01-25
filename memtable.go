@@ -23,18 +23,18 @@ func NewMemTable(capacity int, cmp comparer.BasicComparer) *MemDB {
 	return memDB
 }
 
-func (memTable *MemDB) Put(ukey []byte, sequence Sequence, value []byte) error {
-	ikey := buildInternalKey(nil, ukey, KeyTypeValue, sequence)
+func (memTable *MemDB) Put(ukey []byte, sequence sequence, value []byte) error {
+	ikey := buildInternalKey(nil, ukey, keyTypeValue, sequence)
 	return memTable.SkipList.Put(ikey, value)
 }
 
-func (memTable *MemDB) Del(ukey []byte, sequence Sequence) error {
-	ikey := buildInternalKey(nil, ukey, KeyTypeDel, sequence)
+func (memTable *MemDB) Del(ukey []byte, sequence sequence) error {
+	ikey := buildInternalKey(nil, ukey, keyTypeDel, sequence)
 	return memTable.SkipList.Put(ikey, nil)
 }
 
 // Find find the ukey whose eq ikey.uKey(), if keytype is del, err is ErrNotFound, and will return the rkey
-func (memTable *MemDB) Find(ikey InternalKey) (rkey []byte, value []byte, err error) {
+func (memTable *MemDB) Find(ikey internalKey) (rkey []byte, value []byte, err error) {
 	node, _, err := memTable.SkipList.FindGreaterOrEqual(ikey)
 	if err != nil {
 		return
@@ -47,7 +47,7 @@ func (memTable *MemDB) Find(ikey InternalKey) (rkey []byte, value []byte, err er
 		}
 		if bytes.Compare(ukey, ikey.userKey()) == 0 {
 			rkey = ikeyN
-			if kt == KeyTypeDel {
+			if kt == keyTypeDel {
 				err = errors.ErrKeyDel
 				return
 			}

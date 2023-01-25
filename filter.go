@@ -14,7 +14,7 @@ type iKeyFilterGenerator struct {
 }
 
 func (iFilter iKeyFilter) MayContains(key, filter []byte) bool {
-	return iFilter.uKeyFilter.MayContains(InternalKey(key).userKey(), filter)
+	return iFilter.uKeyFilter.MayContains(internalKey(key).userKey(), filter)
 }
 
 func (iFilter iKeyFilter) NewGenerator() filter.IFilterGenerator {
@@ -26,7 +26,7 @@ func (iFilter iKeyFilter) Name() string {
 }
 
 func (iKeyFilterGenerator iKeyFilterGenerator) AddKey(key []byte) {
-	iKeyFilterGenerator.uKeyGenerator.AddKey(InternalKey(key).userKey())
+	iKeyFilterGenerator.uKeyGenerator.AddKey(internalKey(key).userKey())
 }
 
 func (iKeyFilterGenerator iKeyFilterGenerator) Generate(b *bytes.Buffer) {

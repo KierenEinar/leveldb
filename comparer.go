@@ -9,7 +9,7 @@ type iComparer struct {
 }
 
 func (ic *iComparer) Compare(a, b []byte) int {
-	ia, ib := InternalKey(a), InternalKey(b)
+	ia, ib := internalKey(a), internalKey(b)
 	r := ic.uCmp.Compare(ia.userKey(), ib.userKey())
 	if r != 0 {
 		return r
@@ -26,23 +26,23 @@ func (ic *iComparer) Name() []byte {
 }
 
 func (ic *iComparer) Successor(a []byte) (dest []byte) {
-	au := InternalKey(a)
+	au := internalKey(a)
 	destU := ic.uCmp.Successor(au.userKey())
 	dest = append(destU, kMaxNumBytes...)
 	return
 }
 
 func (ic *iComparer) Separator(a []byte, b []byte) (dest []byte) {
-	ia := InternalKey(a)
-	ib := InternalKey(b)
+	ia := internalKey(a)
+	ib := internalKey(b)
 	destU := ic.uCmp.Separator(ia.userKey(), ib.userKey())
 	dest = append(destU, kMaxNumBytes...)
 	return
 }
 
 func (ic *iComparer) Prefix(a []byte, b []byte) (dest []byte) {
-	ia := InternalKey(a)
-	ib := InternalKey(b)
+	ia := internalKey(a)
+	ib := internalKey(b)
 	destU := ic.uCmp.Prefix(ia.userKey(), ib.userKey())
 	dest = append(destU, kMaxNumBytes...)
 	return

@@ -12,7 +12,7 @@ import (
 )
 
 type WriteBatch struct {
-	seq     Sequence
+	seq     sequence
 	count   uint32
 	scratch [binary.MaxVarintLen64]byte
 	header  [options.KWriteBatchHeaderSize]byte
@@ -31,7 +31,7 @@ func (wb *WriteBatch) Put(key, value []byte) (err error) {
 	wb.setCount(wb.count)
 
 	// key type
-	if err = wb.rep.WriteByte(byte(KeyTypeValue)); err != nil {
+	if err = wb.rep.WriteByte(byte(keyTypeValue)); err != nil {
 		return
 	}
 	// key len
@@ -63,7 +63,7 @@ func (wb *WriteBatch) Delete(key []byte) (err error) {
 	wb.setCount(wb.count)
 
 	// key type
-	if err = wb.rep.WriteByte(byte(KeyTypeDel)); err != nil {
+	if err = wb.rep.WriteByte(byte(keyTypeDel)); err != nil {
 		return
 	}
 	// key len
@@ -78,7 +78,7 @@ func (wb *WriteBatch) Delete(key []byte) (err error) {
 	return
 }
 
-func (wb *WriteBatch) SetSequence(seq Sequence) {
+func (wb *WriteBatch) SetSequence(seq sequence) {
 	wb.seq = seq
 	binary.LittleEndian.PutUint64(wb.header[:options.KWriteBatchSeqSize], uint64(seq))
 	wb.rep.Update(0, wb.header[:options.KWriteBatchSeqSize])
@@ -162,7 +162,7 @@ func newWriter(batch *WriteBatch, mutex *sync.RWMutex) *writer {
 	}
 }
 
-func decodeBatchChunk(reader storage.SequentialReader, seqNum Sequence) (wb WriteBatch, err error) {
+func decodeBatchChunk(reader storage.SequentialReader, seqNum sequence) (wb WriteBatch, err error) {
 	n, err := reader.Read(wb.header[:])
 	if err != nil {
 		return
@@ -172,10 +172,10 @@ func decodeBatchChunk(reader storage.SequentialReader, seqNum Sequence) (wb Writ
 		return
 	}
 
-	seq := Sequence(binary.LittleEndian.Uint64(wb.header[:options.KWriteBatchSeqSize]))
+	seq := sequence(binary.LittleEndian.Uint64(wb.header[:options.KWriteBatchSeqSize]))
 	batchCount := binary.LittleEndian.Uint32(wb.header[options.KWriteBatchSeqSize:options.KWriteBatchHeaderSize])
 	utils.Assert(seq >= seqNum)
-	utils.Assert(seq+Sequence(batchCount) > seqNum)
+	utils.Assert(seq+sequence(batchCount) > seqNum)
 	wb.SetSequence(seq)
 	for i := uint32(0); i < batchCount; i++ {
 		err = decodeBatchData(reader, &wb)
@@ -204,7 +204,7 @@ func decodeBatchData(r storage.SequentialReader, wb *WriteBatch) (err error) {
 		return
 	}
 
-	if kt == byte(KeyTypeValue) {
+	if kt == byte(keyTypeValue) {
 		vLen, err := binary.ReadUvarint(r)
 		if err != nil {
 			return
@@ -216,7 +216,7 @@ func decodeBatchData(r storage.SequentialReader, wb *WriteBatch) (err error) {
 			return
 		}
 		err = wb.Put(*key, *value)
-	} else if kt == byte(KeyTypeDel) {
+	} else if kt == byte(keyTypeDel) {
 		err = wb.Delete(*key)
 	}
 	return
@@ -224,8 +224,8 @@ func decodeBatchData(r storage.SequentialReader, wb *WriteBatch) (err error) {
 
 func (wb *WriteBatch) insertInto(memDb *MemDB) error {
 	utils.Assert(memDb != nil)
-	err := wb.foreach(func(kt KeyType, ukey []byte, seq Sequence, value []byte) error {
-		if kt == KeyTypeDel {
+	err := wb.foreach(func(kt keyType, ukey []byte, seq sequence, value []byte) error {
+		if kt == keyTypeDel {
 			return memDb.Del(ukey, seq)
 		} else {
 			return memDb.Put(ukey, seq, value)
@@ -234,7 +234,7 @@ func (wb *WriteBatch) insertInto(memDb *MemDB) error {
 	return err
 }
 
-func (wb *WriteBatch) foreach(fn func(kt KeyType, key []byte, seq Sequence, value []byte) error) error {
+func (wb *WriteBatch) foreach(fn func(kt keyType, key []byte, seq sequence, value []byte) error) error {
 
 	wb.rep.ResetRead(0)
 	seqN, err := wb.rep.Read(wb.header[:options.KWriteBatchSeqSize])
@@ -248,7 +248,7 @@ func (wb *WriteBatch) foreach(fn func(kt KeyType, key []byte, seq Sequence, valu
 	utils.Assert(countN == options.KWriteBatchCountSize)
 	count := binary.LittleEndian.Uint32(wb.header[options.KWriteBatchHeaderSize:options.KWriteBatchHeaderSize])
 
-	utils.Assert(Sequence(seq) == wb.seq)
+	utils.Assert(sequence(seq) == wb.seq)
 	utils.Assert(count == wb.count)
 
 	for i := 0; i < int(wb.count); i++ {
@@ -274,16 +274,16 @@ func (wb *WriteBatch) foreach(fn func(kt KeyType, key []byte, seq Sequence, valu
 			goto END
 		}
 
-		if KeyType(kt) == KeyTypeValue {
+		if keyType(kt) == keyTypeValue {
 			valLen, err := binary.ReadUvarint(wb.rep)
 			if err != nil {
 				goto END
 			}
 			value = *utils.PoolGetBytes(int(valLen))
-			err = fn(KeyType(kt), key, wb.seq+Sequence(i), value)
+			err = fn(keyType(kt), key, wb.seq+sequence(i), value)
 			goto END
 		} else {
-			err = fn(KeyType(kt), key, wb.seq+Sequence(i), nil)
+			err = fn(keyType(kt), key, wb.seq+sequence(i), nil)
 			goto END
 		}
 
