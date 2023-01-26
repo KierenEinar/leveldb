@@ -156,7 +156,7 @@ func (tableOperation *tableOperation) create(fileMeta tFile) (*tWriter, error) {
 		w:          w,
 		fileMeta:   fileMeta,
 		tableCache: tableOperation.tableCache,
-		tw:         table.NewWriter(w, tableOperation.opt.FilterPolicy, tableOperation.opt.InternalComparer),
+		tw:         table.NewWriter(w, tableOperation.opt),
 	}, nil
 }
 

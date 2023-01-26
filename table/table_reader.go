@@ -15,20 +15,6 @@ import (
 	"sort"
 )
 
-type compressionType uint8
-
-const (
-	kCompressionTypeNone   compressionType = 0
-	kCompressionTypeSnappy compressionType = 1
-)
-
-const (
-	kBlockTailLen   = 5
-	kTableFooterLen = 48
-)
-
-var magicByte = []byte("\x57\xfb\x80\x8b\x24\x75\x47\xdb")
-
 type blockContent struct {
 	data      []byte
 	cacheable bool

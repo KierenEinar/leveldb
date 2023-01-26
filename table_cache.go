@@ -11,9 +11,8 @@ import (
 )
 
 type TableCache struct {
-	cache   cache.Cache
-	storage storage.Storage
-	opt     *options.Options
+	cache cache.Cache
+	opt   *options.Options
 }
 
 func (c *TableCache) Close() {
@@ -23,9 +22,8 @@ func (c *TableCache) Close() {
 
 func NewTableCache(opt *options.Options) *TableCache {
 	c := &TableCache{
-		cache:   cache.NewCache(opt.MaxOpenFiles, opt.Hash32),
-		storage: opt.Storage,
-		opt:     opt,
+		cache: cache.NewCache(opt.MaxOpenFiles, opt.Hash32),
+		opt:   opt,
 	}
 	runtime.SetFinalizer(c, (*TableCache).Close)
 	return c
@@ -77,20 +75,18 @@ func (c *TableCache) Evict(fd uint64) {
 
 func (c *TableCache) findTable(tFile tFile, cacheHandle **cache.LRUHandle) (err error) {
 	lookupKey := make([]byte, 8)
-	binary.LittleEndian.PutUint64(lookupKey[8:], uint64(tFile.fd))
+	binary.LittleEndian.PutUint64(lookupKey, uint64(tFile.fd))
 	handle := c.cache.Lookup(lookupKey)
 	if handle == nil {
-		reader, oErr := c.storage.NewRandomAccessReader(storage.Fd{
+		reader, err := c.opt.Storage.NewRandomAccessReader(storage.Fd{
 			FileType: storage.KTableFile,
 			Num:      uint64(tFile.fd),
 		})
-		if oErr != nil {
-			err = oErr
+		if err != nil {
 			return
 		}
-		tReader, tErr := table.NewTableReader(c.opt, reader, tFile.size)
-		if tErr != nil {
-			err = tErr
+		tReader, err := table.NewTableReader(c.opt, reader, tFile.size)
+		if err != nil {
 			return
 		}
 		handle = c.cache.Insert(lookupKey, 1, tReader, c.deleteEntry)
