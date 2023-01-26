@@ -17,16 +17,8 @@ const (
 	keyTypeSeek          = keyTypeValue
 )
 
-var (
-	kMaxNumBytes = make([]byte, 8)
-)
-
 const kMaxSequenceNum = (uint64(1) << 56) - 1
 const kMaxNum = kMaxSequenceNum | uint64(keyTypeValue)
-
-func init() {
-	binary.PutUvarint(kMaxNumBytes, kMaxNum)
-}
 
 type internalKey []byte
 

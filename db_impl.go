@@ -735,6 +735,10 @@ func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, e
 		opt.FilterPolicy = IFilter
 	}
 
+	if o == nil || o.FilterBaseLg == 0 {
+		opt.FilterBaseLg = 8
+	}
+
 	if o == nil || o.Hash32 == nil {
 		opt.Hash32 = fnv.New32()
 	}
@@ -784,14 +788,14 @@ func newDBImpl(opt *options.Options) *DBImpl {
 		versionSet: &VersionSet{
 			versions:    list.New(),
 			compactPtrs: [7]compactPtr{},
-			tableCache:  newTableCache(opt),
+			tableCache:  NewTableCache(opt),
 			opt:         opt,
 		},
 		closed:         make(chan struct{}),
 		scratchBatch:   NewWriteBatch(),
 		writers:        list.New(),
 		hasImm:         0,
-		tableCache:     newTableCache(opt),
+		tableCache:     NewTableCache(opt),
 		snapshots:      list.New(),
 		opt:            opt,
 		pendingOutputs: make(map[uint64]struct{}),

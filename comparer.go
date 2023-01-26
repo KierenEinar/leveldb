@@ -28,7 +28,7 @@ func (ic *iComparer) Name() []byte {
 func (ic *iComparer) Successor(a []byte) (dest []byte) {
 	au := internalKey(a)
 	destU := ic.uCmp.Successor(au.userKey())
-	dest = append(destU, kMaxNumBytes...)
+	buildInternalKey(dest, destU, keyTypeValue, sequence(kMaxSequenceNum))
 	return
 }
 
@@ -36,15 +36,14 @@ func (ic *iComparer) Separator(a []byte, b []byte) (dest []byte) {
 	ia := internalKey(a)
 	ib := internalKey(b)
 	destU := ic.uCmp.Separator(ia.userKey(), ib.userKey())
-	dest = append(destU, kMaxNumBytes...)
+	buildInternalKey(dest, destU, keyTypeValue, sequence(kMaxSequenceNum))
 	return
 }
 
 func (ic *iComparer) Prefix(a []byte, b []byte) (dest []byte) {
 	ia := internalKey(a)
 	ib := internalKey(b)
-	destU := ic.uCmp.Prefix(ia.userKey(), ib.userKey())
-	dest = append(destU, kMaxNumBytes...)
+	dest = ic.uCmp.Prefix(ia.userKey(), ib.userKey())
 	return
 }
 

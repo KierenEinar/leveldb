@@ -21,7 +21,7 @@ func (c *TableCache) Close() {
 	runtime.SetFinalizer(c, nil)
 }
 
-func newTableCache(opt *options.Options) *TableCache {
+func NewTableCache(opt *options.Options) *TableCache {
 	c := &TableCache{
 		cache:   cache.NewCache(opt.MaxOpenFiles, opt.Hash32),
 		storage: opt.Storage,

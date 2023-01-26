@@ -491,7 +491,7 @@ func (fs *FileStorage) FileSize(fd Fd) (int64, error) {
 
 	if info.IsDir() {
 		return 0, &os.PathError{
-			Op:   "FileSize",
+			Op:   "ApproximateSize",
 			Path: filePath,
 			Err:  fmt.Errorf("get file size err, is dir"),
 		}

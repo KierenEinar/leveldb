@@ -206,7 +206,7 @@ func (t *tWriter) finish() error {
 }
 
 func (t *tWriter) size() int {
-	return t.tw.FileSize()
+	return t.tw.ApproximateSize()
 }
 
 type tFileArrIteratorIndexer struct {

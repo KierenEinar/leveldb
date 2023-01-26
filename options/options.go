@@ -44,6 +44,9 @@ type Options struct {
 	// filter keys policy, set default InternalKey Filter
 	FilterPolicy filter.IFilter
 
+	// filter base lg, set default 8 (1<<8=1024)
+	FilterBaseLg uint8
+
 	// set the storage to support data persist, set default fileStorage
 	Storage storage.Storage
 

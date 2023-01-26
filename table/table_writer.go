@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 	"leveldb/comparer"
 	"leveldb/filter"
+	"leveldb/options"
 	"leveldb/storage"
 	"leveldb/utils"
 )
@@ -98,30 +99,38 @@ footer
 	/-----------------------------/
 **/
 
-const defaultDataBlockSize = 1 << 11
-
 type blockWriter struct {
-	scratch          []byte
-	data             bytes.Buffer
-	prevIKey         []byte
+	uVarIntScratch   [binary.MaxVarintLen64]byte
+	data             *bytes.Buffer
+	prevKey          *bytes.Buffer
 	entries          int
 	restarts         []int
 	restartThreshold int
 	offset           int
-	cmp              comparer.Comparer
+	comparer         comparer.Comparer
 }
 
-func (bw *blockWriter) append(ikey []byte, value []byte) {
+func newBlockWriter(blockRestartInterval int, comparer comparer.Comparer) *blockWriter {
+	bw := &blockWriter{
+		data:             bytes.NewBuffer(nil),
+		prevKey:          bytes.NewBuffer(nil),
+		restartThreshold: blockRestartInterval,
+		comparer:         comparer,
+	}
+	return bw
+}
+
+func (bw *blockWriter) append(key []byte, value []byte) {
 
 	if bw.entries%bw.restartThreshold == 0 {
-		bw.prevIKey = bw.prevIKey[:0]
 		bw.restarts = append(bw.restarts, bw.offset)
 	}
 
-	bw.writeEntry(ikey, value)
+	bw.writeEntry(key, value)
 	bw.entries++
 
-	bw.prevIKey = append([]byte(nil), ikey...)
+	bw.prevKey.Reset()
+	bw.prevKey.Write(key)
 
 }
 
@@ -130,11 +139,9 @@ func (bw *blockWriter) finish() {
 	if bw.entries == 0 {
 		bw.restarts = append(bw.restarts, 0)
 	}
-
 	bw.restarts = append(bw.restarts, len(bw.restarts))
-
+	buf4 := make([]byte, 4)
 	for _, v := range bw.restarts {
-		buf4 := make([]byte, 4)
 		binary.LittleEndian.PutUint32(buf4, uint32(v))
 		bw.data.Write(buf4)
 	}
@@ -145,27 +152,27 @@ func (bw *blockWriter) bytesLen() int {
 	if restartsLen == 0 {
 		restartsLen = 1
 	}
-	return bw.data.Len() + restartsLen*4 + 4
+	return bw.offset + restartsLen*4 + 4
 }
 
-func (bw *blockWriter) writeEntry(ikey []byte, value []byte) {
+func (bw *blockWriter) writeEntry(key []byte, value []byte) {
 
 	var (
-		shareUKey     = bw.cmp.Prefix(bw.prevIKey, ikey)
+		shareUKey     = bw.comparer.Prefix(bw.prevKey.Bytes(), key)
 		shareUKeyLen  = len(shareUKey)
-		unShareKeyLen = len(ikey) - shareUKeyLen
-		unShareKey    = ikey[unShareKeyLen:]
+		unShareKeyLen = len(key) - shareUKeyLen
+		unShareKey    = key[unShareKeyLen:]
 		vLen          = len(value)
 	)
 
-	s1 := binary.PutUvarint(bw.scratch, uint64(shareUKeyLen))
-	n1, _ := bw.data.Write(bw.scratch[:s1])
+	s1 := binary.PutUvarint(bw.uVarIntScratch[:], uint64(shareUKeyLen))
+	n1, _ := bw.data.Write(bw.uVarIntScratch[:s1])
 
-	s2 := binary.PutUvarint(bw.scratch, uint64(unShareKeyLen))
-	n2, _ := bw.data.Write(bw.scratch[:s2])
+	s2 := binary.PutUvarint(bw.uVarIntScratch[:], uint64(unShareKeyLen))
+	n2, _ := bw.data.Write(bw.uVarIntScratch[:s2])
 
-	s3 := binary.PutUvarint(bw.scratch, uint64(vLen))
-	n3, _ := bw.data.Write(bw.scratch[:s3])
+	s3 := binary.PutUvarint(bw.uVarIntScratch[:], uint64(vLen))
+	n3, _ := bw.data.Write(bw.uVarIntScratch[:s3])
 
 	n4, _ := bw.data.Write(unShareKey)
 
@@ -177,27 +184,35 @@ func (bw *blockWriter) writeEntry(ikey []byte, value []byte) {
 
 func (bw *blockWriter) reset() {
 	bw.data.Reset()
-	bw.prevIKey = nil
+	bw.prevKey.Reset()
 	bw.offset = 0
 	bw.restarts = bw.restarts[:0]
 	bw.entries = 0
 }
 
-type FilterWriter struct {
-	data            bytes.Buffer
+type filterWriter struct {
+	data            *bytes.Buffer
 	offsets         []int
 	nkeys           int
-	baseLg          int
+	baseLg          uint8
 	filterGenerator filter.IFilterGenerator
-	numBitsPerKey   uint8
 }
 
-func (fw *FilterWriter) addKey(ikey []byte) {
-	fw.filterGenerator.AddKey(ikey)
+func newFilterWriter(iFilter filter.IFilter, baseLg uint8) *filterWriter {
+	fw := &filterWriter{
+		data:            bytes.NewBuffer(nil),
+		baseLg:          baseLg,
+		filterGenerator: iFilter.NewGenerator(),
+	}
+	return fw
+}
+
+func (fw *filterWriter) addKey(key []byte) {
+	fw.filterGenerator.AddKey(key)
 	fw.nkeys++
 }
 
-func (fw *FilterWriter) flush(offset int) {
+func (fw *filterWriter) flush(offset int) {
 
 	/**
 	data block.. 			0      1      2               	  3                    		4
@@ -220,10 +235,10 @@ func (fw *FilterWriter) flush(offset int) {
 
 }
 
-func (fw *FilterWriter) generate() {
+func (fw *filterWriter) generate() {
 	// don't forget to insert offset 0 pos into head in final finish
 	if fw.nkeys > 0 {
-		fw.filterGenerator.Generate(&fw.data)
+		fw.filterGenerator.Generate(fw.data)
 		fw.nkeys = 0
 	}
 	fw.offsets = append(fw.offsets, fw.data.Len())
@@ -251,66 +266,66 @@ func readBH(buf []byte) (bhLen int, bh blockHandle) {
 }
 
 type Writer struct {
-	writer      storage.SequentialWriter
-	dataBlock   *blockWriter
-	indexBlock  *blockWriter
-	metaBlock   *blockWriter
-	filterBlock *FilterWriter
+	writer           storage.SequentialWriter
+	dataBlockWriter  *blockWriter
+	indexBlockWriter *blockWriter
+	metaBlockWriter  *blockWriter
+	filterWriter     *filterWriter
 
-	blockHandle *blockHandle
-	prevKey     []byte
-	offset      int
-	entries     int
+	pendingBH *blockHandle
+	offset    int
+	entries   int
 
-	iFilter filter.IFilter
+	scratch  [50]byte // tail 20 bytes used to encode block handle
+	comparer comparer.Comparer
 
-	scratch [50]byte // tail 20 bytes used to encode block handle
-	cmp     comparer.Comparer
+	opt *options.Options
 }
 
-func NewWriter(writer storage.SequentialWriter, iFilter filter.IFilter, cmp comparer.Comparer) *Writer {
-	return &Writer{
-		writer:  writer,
-		iFilter: iFilter,
-		cmp:     cmp,
+func NewWriter(writer storage.SequentialWriter, opt *options.Options) *Writer {
+	w := &Writer{
+		writer:           writer,
+		dataBlockWriter:  newBlockWriter(int(opt.BlockRestartInterval), opt.InternalComparer),
+		indexBlockWriter: newBlockWriter(1, opt.InternalComparer),
+		metaBlockWriter:  newBlockWriter(1, opt.InternalComparer),
+		filterWriter:     newFilterWriter(opt.FilterPolicy, opt.FilterBaseLg),
+		comparer:         opt.InternalComparer,
+		opt:              opt,
 	}
+	return w
 }
 
-func (tableWriter *Writer) Append(ikey, value []byte) error {
+func (tableWriter *Writer) Append(key, value []byte) (err error) {
 
-	dataBlock := tableWriter.dataBlock
-	filterBlock := tableWriter.filterBlock
+	dataBlockWriter := tableWriter.dataBlockWriter
+	filterWriter := tableWriter.filterWriter
 
-	if tableWriter.entries > 0 && bytes.Compare(dataBlock.prevIKey, ikey) > 0 {
-		return errors.New("tableWriter Append ikey not sorted")
+	if tableWriter.entries > 0 && bytes.Compare(dataBlockWriter.prevKey.Bytes(), key) > 0 {
+		err = errors.New("tableWriter Append ikey not sorted")
+		return
 	}
 
-	err := tableWriter.flushPendingBH(ikey)
-	if err != nil {
-		return err
-	}
+	tableWriter.flushPendingBH(key)
+	dataBlockWriter.append(key, value)
+	filterWriter.addKey(key)
 
-	dataBlock.append(ikey, value)
-
-	filterBlock.addKey(ikey)
-
-	if dataBlock.bytesLen() >= defaultDataBlockSize {
-		ferr := tableWriter.finishDataBlock()
-		if ferr != nil {
-			return ferr
+	if dataBlockWriter.bytesLen() >= int(tableWriter.opt.BlockSize) {
+		err = tableWriter.finishDataBlock()
+		if err != nil {
+			return
 		}
 	}
 
-	return nil
+	return
 }
 
 // Close current sstable
 func (tableWriter *Writer) Close() error {
 
-	dataBlock := tableWriter.dataBlock
+	dataBlockWriter := tableWriter.dataBlockWriter
 
 	// finish all data block
-	if len(dataBlock.prevIKey) > 0 {
+	if len(dataBlockWriter.prevKey.Bytes()) > 0 {
 		err := tableWriter.finishDataBlock()
 		if err != nil {
 			return err
@@ -318,10 +333,7 @@ func (tableWriter *Writer) Close() error {
 	}
 
 	// flush indexed block
-	err := tableWriter.flushPendingBH(nil)
-	if err != nil {
-		return err
-	}
+	tableWriter.flushPendingBH(nil)
 
 	// flush filterPolicy
 	bh, err := tableWriter.finishFilterBlock()
@@ -330,16 +342,16 @@ func (tableWriter *Writer) Close() error {
 	}
 
 	// flush meta block
-	metaBlock := tableWriter.metaBlock
-	metaBlock.append([]byte("filterPolicy.bloomFilter"), writeBH(nil, *bh))
-	metaBH, err := tableWriter.writeBlock(&metaBlock.data, kCompressionTypeNone)
+	metaBlockWriter := tableWriter.metaBlockWriter
+	metaBlockWriter.append([]byte(tableWriter.opt.FilterPolicy.Name()), writeBH(nil, *bh))
+	metaBH, err := tableWriter.writeBlock(metaBlockWriter.data, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
 
 	// flush index block
-	indexBlock := tableWriter.indexBlock
-	indexBH, err := tableWriter.writeBlock(&indexBlock.data, kCompressionTypeNone)
+	indexBlockWriter := tableWriter.indexBlockWriter
+	indexBH, err := tableWriter.writeBlock(indexBlockWriter.data, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
@@ -354,20 +366,20 @@ func (tableWriter *Writer) Close() error {
 
 func (tableWriter *Writer) finishDataBlock() error {
 
-	bh, err := tableWriter.writeBlock(&tableWriter.dataBlock.data, kCompressionTypeNone)
+	bh, err := tableWriter.writeBlock(tableWriter.dataBlockWriter.data, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
-	tableWriter.blockHandle = bh
-	tableWriter.dataBlock.reset()
-	filterWriter := tableWriter.filterBlock
+	tableWriter.pendingBH = bh
+	tableWriter.dataBlockWriter.reset()
+	filterWriter := tableWriter.filterWriter
 	filterWriter.flush(tableWriter.offset)
 	return nil
 }
 
 func (tableWriter *Writer) finishFilterBlock() (*blockHandle, error) {
 
-	filterWriter := tableWriter.filterBlock
+	filterWriter := tableWriter.filterWriter
 	filterWriter.generate()
 	filterWriter.offsets = append([]int{0}, filterWriter.offsets...)
 	offsetBuf := make([]byte, 4)
@@ -375,11 +387,7 @@ func (tableWriter *Writer) finishFilterBlock() (*blockHandle, error) {
 		binary.LittleEndian.PutUint32(offsetBuf, uint32(offset))
 		filterWriter.data.Write(offsetBuf)
 	}
-	bh, err := tableWriter.writeBlock(&filterWriter.data, kCompressionTypeNone)
-	if err != nil {
-		return nil, err
-	}
-	return bh, nil
+	return tableWriter.writeBlock(filterWriter.data, kCompressionTypeNone)
 }
 
 func (tableWriter *Writer) writeBlock(buf *bytes.Buffer, compressionType compressionType) (*blockHandle, error) {
@@ -410,22 +418,24 @@ func (tableWriter *Writer) writeBlock(buf *bytes.Buffer, compressionType compres
 	return bh, nil
 }
 
-func (tableWriter *Writer) flushPendingBH(ikey []byte) error {
+func (tableWriter *Writer) flushPendingBH(key []byte) {
 
-	if tableWriter.blockHandle == nil {
-		return nil
+	if tableWriter.pendingBH == nil {
+		return
 	}
+	prevKey := tableWriter.dataBlockWriter.prevKey.Bytes()
+
 	var separator []byte
-	if len(ikey) == 0 {
-		separator = tableWriter.cmp.Successor(tableWriter.prevKey)
+	if len(key) == 0 {
+		separator = tableWriter.comparer.Successor(prevKey)
 	} else {
-		separator = tableWriter.cmp.Separator(tableWriter.prevKey, ikey)
+		separator = tableWriter.comparer.Separator(prevKey, key)
 	}
-	indexBlock := tableWriter.indexBlock
-	bhEntry := writeBH(tableWriter.scratch[30:], *tableWriter.blockHandle)
-	indexBlock.append(separator, bhEntry)
-	tableWriter.blockHandle = nil
-	return nil
+	indexBlockWriter := tableWriter.indexBlockWriter
+	bhEntry := writeBH(tableWriter.scratch[30:], *tableWriter.pendingBH)
+	indexBlockWriter.append(separator, bhEntry)
+	tableWriter.pendingBH = nil
+	return
 }
 
 func (tableWriter *Writer) flushFooter(indexBH, metaBH blockHandle) error {
@@ -448,6 +458,6 @@ func (tableWriter *Writer) flushFooter(indexBH, metaBH blockHandle) error {
 	return nil
 }
 
-func (tableWriter *Writer) FileSize() int {
+func (tableWriter *Writer) ApproximateSize() int {
 	return tableWriter.offset
 }
