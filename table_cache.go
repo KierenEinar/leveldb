@@ -3,6 +3,7 @@ package leveldb
 import (
 	"encoding/binary"
 	"leveldb/cache"
+	"leveldb/errors"
 	"leveldb/iterator"
 	"leveldb/options"
 	"leveldb/storage"
@@ -29,19 +30,22 @@ func NewTableCache(opt *options.Options) *TableCache {
 	return c
 }
 
-func (c *TableCache) Get(ikey internalKey, tFile tFile, f func(rkey internalKey, value []byte, err error)) error {
+func (c *TableCache) Get(ikey internalKey, tFile tFile, f func(rkey internalKey, value []byte, err error)) {
 	var cacheHandle *cache.LRUHandle
-	if err := c.findTable(tFile, &cacheHandle); err != nil {
-		return err
+	var err error
+	if err = c.findTable(tFile, &cacheHandle); err != nil {
+		f(nil, nil, err)
+		return
 	}
 	tReader, ok := cacheHandle.Value().(*table.Reader)
 	if !ok {
-		panic("leveldb/cache value not type *Reader")
+		f(nil, nil, errors.ErrCacheHandleConvertErr)
+		return
 	}
 	rKey, rValue, rErr := tReader.Find(ikey)
-	f(rKey, append([]byte(nil), rValue...), rErr)
+	f(append([]byte(nil), rKey...), append([]byte(nil), rValue...), rErr)
 	c.cache.UnRef(cacheHandle)
-	return nil
+	return
 }
 
 func (c *TableCache) NewIterator(tFile tFile) (iter iterator.Iterator, err error) {

@@ -650,7 +650,6 @@ const (
 	kStatFound
 	kStatDelete
 	kStatCorruption
-	kStatGetErr
 )
 
 func (v *Version) get(ikey internalKey, value *[]byte) (err error) {
@@ -659,14 +658,14 @@ func (v *Version) get(ikey internalKey, value *[]byte) (err error) {
 	stat := kStatNotFound
 
 	match := func(level int, tFile tFile) (continueLoop bool) {
-		getErr := v.vSet.tableCache.Get(ikey, tFile, func(rkey internalKey, rValue []byte, rErr error) {
+		v.vSet.tableCache.Get(ikey, tFile, func(rkey internalKey, rValue []byte, rErr error) {
 			if rErr == errors.ErrNotFound {
 				stat = kStatNotFound
 				return
 			}
 
 			if rErr != nil {
-				stat = kStatGetErr
+				err = rErr
 				return
 			}
 
@@ -685,8 +684,7 @@ func (v *Version) get(ikey internalKey, value *[]byte) (err error) {
 			return
 		})
 
-		if getErr != nil {
-			err = getErr
+		if err != nil {
 			return false
 		}
 

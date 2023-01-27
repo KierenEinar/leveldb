@@ -11,7 +11,7 @@ type ErrCorruption struct {
 
 func NewErrCorruption(msg string) *ErrCorruption {
 	return &ErrCorruption{
-		error: fmt.Errorf("leveldb/table err corruption, msg=%s", msg),
+		error: fmt.Errorf("leveldb err corruption, msg=%s", msg),
 	}
 }
 
@@ -29,4 +29,5 @@ var (
 	ErrMissingCurrent           = errors.New("leveldb/open missing current, set CreateIfMissingCurrent true fix it")
 	ErrLocked                   = errors.New("leveldb/storage file has been locked")
 	ErrNotLocked                = errors.New("leveldb/storage file not locked")
+	ErrCacheHandleConvertErr    = errors.New("leveldb/tablecache value convert *table.Reader failed")
 )
