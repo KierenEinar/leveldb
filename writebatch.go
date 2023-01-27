@@ -168,7 +168,7 @@ func decodeBatchChunk(reader storage.SequentialReader, seqNum sequence) (wb Writ
 		return
 	}
 	if n < options.KWriteBatchHeaderSize {
-		err = errors.NewErrCorruption("leveldb/chunk batch group header less than header size")
+		err = errors.NewErrCorruption("leveldb/chunk batch group header less than header approximateSize")
 		return
 	}
 

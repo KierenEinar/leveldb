@@ -198,14 +198,14 @@ func (t *tWriter) finish() error {
 		iter.UnRef()
 		t.fileMeta.iMax = t.last
 		t.fileMeta.iMin = t.first
-		t.fileMeta.size = t.size()
+		t.fileMeta.size = t.approximateSize()
 	}
 
 	return err
 
 }
 
-func (t *tWriter) size() int {
+func (t *tWriter) approximateSize() int {
 	return t.tw.ApproximateSize()
 }
 

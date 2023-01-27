@@ -17,8 +17,6 @@ type compaction1 struct {
 	sourceLevel int
 	version     *Version
 
-	cPtr compactPtr
-
 	// compaction grandparent level
 	gp                tFiles
 	gpOverlappedBytes int
@@ -49,7 +47,7 @@ func (vSet *VersionSet) pickCompaction1() *compaction1 {
 	inputs := make(tFiles, 0)
 	var sourceLevel int
 	if sizeCompaction {
-		level := vSet.current.levels[version.cLevel]
+		level := version.levels[version.cLevel]
 		cPtr := vSet.compactPtrs[version.cLevel]
 		sourceLevel = version.cLevel
 		if version.cLevel > 0 && cPtr != nil {
@@ -289,7 +287,7 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 			continue
 		}
 
-		if c.tWriter != nil && c.tWriter.size() > int(c.opt.MaxEstimateFileSize) {
+		if c.tWriter != nil && c.tWriter.approximateSize() > int(c.opt.MaxEstimateFileSize) {
 			if err = dbImpl.finishCompactionOutputFile(c); err != nil {
 				break
 			}

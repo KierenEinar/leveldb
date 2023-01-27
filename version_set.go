@@ -19,7 +19,7 @@ import (
 type VersionSet struct {
 	versions    *list.List
 	current     *Version
-	compactPtrs [options.KLevelNum]compactPtr
+	compactPtrs [options.KLevelNum]*compactPtr
 	cmp         comparer.Comparer
 
 	comparerName   []byte
@@ -78,8 +78,8 @@ func newBuilder(vSet *VersionSet, base *Version) *vBuilder {
 }
 
 func (builder *vBuilder) apply(edit VersionEdit) {
-	for _, cPtr := range edit.compactPtrs {
-		builder.vSet.compactPtrs[cPtr.level] = cPtr
+	for idx, cPtr := range edit.compactPtrs {
+		builder.vSet.compactPtrs[cPtr.level] = &edit.compactPtrs[idx]
 	}
 	for _, delTable := range edit.delTables {
 		level, number := delTable.level, delTable.number
@@ -769,13 +769,6 @@ func (vSet *VersionSet) markFileUsed(fileNum uint64) bool {
 		return true
 	}
 	return false
-}
-
-func (vSet *VersionSet) loadCompactPtr(level int) internalKey {
-	if level < len(vSet.compactPtrs) {
-		return nil
-	}
-	return vSet.compactPtrs[level].ikey
 }
 
 func (vSet *VersionSet) needCompaction() bool {

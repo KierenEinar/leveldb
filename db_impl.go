@@ -787,7 +787,7 @@ func newDBImpl(opt *options.Options) *DBImpl {
 		rwMutex: sync.RWMutex{},
 		versionSet: &VersionSet{
 			versions:    list.New(),
-			compactPtrs: [7]compactPtr{},
+			compactPtrs: [7]*compactPtr{},
 			tableCache:  NewTableCache(opt),
 			opt:         opt,
 		},
