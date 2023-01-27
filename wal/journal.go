@@ -5,8 +5,9 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"io"
-	"leveldb/errors"
-	"leveldb/storage"
+
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/storage"
 )
 
 /**

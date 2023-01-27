@@ -3,8 +3,9 @@ package leveldb
 import (
 	"encoding/binary"
 	"fmt"
-	"leveldb/errors"
-	"leveldb/utils"
+
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 type sequence uint64

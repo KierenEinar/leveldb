@@ -2,13 +2,14 @@ package leveldb
 
 import (
 	"bytes"
-	"leveldb/comparer"
-	"leveldb/errors"
-	"leveldb/iterator"
-	"leveldb/options"
-	"leveldb/utils"
 	"sort"
 	"sync/atomic"
+
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/iterator"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 type compaction1 struct {

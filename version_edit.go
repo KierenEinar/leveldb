@@ -3,7 +3,8 @@ package leveldb
 import (
 	"encoding/binary"
 	"io"
-	"leveldb/storage"
+
+	"github.com/KierenEinar/leveldb/storage"
 )
 
 const (

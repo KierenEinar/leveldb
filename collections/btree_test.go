@@ -2,9 +2,10 @@ package collections
 
 import (
 	"fmt"
-	"leveldb/comparer"
 	"math/rand"
 	"testing"
+
+	"github.com/KierenEinar/leveldb/comparer"
 )
 
 func TestBTree(t *testing.T) {

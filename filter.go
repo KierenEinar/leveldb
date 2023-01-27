@@ -2,7 +2,8 @@ package leveldb
 
 import (
 	"bytes"
-	"leveldb/filter"
+
+	"github.com/KierenEinar/leveldb/filter"
 )
 
 type iKeyFilter struct {

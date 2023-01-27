@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"encoding/binary"
 	"hash/crc32"
-	"leveldb/cache"
-	"leveldb/comparer"
-	"leveldb/errors"
-	"leveldb/filter"
-	"leveldb/iterator"
-	"leveldb/options"
-	"leveldb/storage"
-	"leveldb/utils"
 	"sort"
+
+	"github.com/KierenEinar/leveldb/cache"
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/filter"
+	"github.com/KierenEinar/leveldb/iterator"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/storage"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 type blockContent struct {

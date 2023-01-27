@@ -5,12 +5,13 @@ package storage
 
 import (
 	"errors"
-	"leveldb/utils"
 	"math"
 	"os"
 	"runtime"
 	"syscall"
 	"unsafe"
+
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 var gOpenReadOnlyFileLimit = -1

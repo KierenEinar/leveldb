@@ -2,15 +2,16 @@ package leveldb
 
 import (
 	"bytes"
-	"leveldb/comparer"
-	"leveldb/errors"
-	"leveldb/iterator"
-	"leveldb/options"
-	"leveldb/storage"
-	"leveldb/table"
-	"leveldb/utils"
 	"sort"
 	"unsafe"
+
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/iterator"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/storage"
+	"github.com/KierenEinar/leveldb/table"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 type tFile struct {

@@ -1,10 +1,10 @@
 package iterator
 
 import (
-	"leveldb/collections"
-	"leveldb/comparer"
-	"leveldb/errors"
-	"leveldb/utils"
+	"github.com/KierenEinar/leveldb/collections"
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 type Direction int

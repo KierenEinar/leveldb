@@ -3,12 +3,13 @@ package leveldb
 import (
 	"encoding/binary"
 	"io"
-	"leveldb/collections"
-	"leveldb/errors"
-	"leveldb/options"
-	"leveldb/storage"
-	"leveldb/utils"
 	"sync"
+
+	"github.com/KierenEinar/leveldb/collections"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/storage"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 type WriteBatch struct {

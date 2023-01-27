@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"leveldb/errors"
-	"leveldb/utils"
 	"os"
 	"path"
 	"runtime"
 	"sync"
 	"sync/atomic"
+
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 type SequentialWriter interface {

@@ -3,9 +3,10 @@ package collections
 import (
 	"bytes"
 	"fmt"
-	"leveldb/comparer"
-	"leveldb/utils"
 	"sort"
+
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 type BTree struct {

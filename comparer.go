@@ -1,7 +1,7 @@
 package leveldb
 
 import (
-	"leveldb/comparer"
+	"github.com/KierenEinar/leveldb/comparer"
 )
 
 type iComparer struct {

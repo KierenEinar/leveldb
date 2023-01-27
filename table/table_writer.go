@@ -5,11 +5,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
-	"leveldb/comparer"
-	"leveldb/filter"
-	"leveldb/options"
-	"leveldb/storage"
-	"leveldb/utils"
+
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/filter"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/storage"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 /**

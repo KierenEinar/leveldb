@@ -3,8 +3,9 @@ package cache
 import (
 	"bytes"
 	hash2 "hash"
-	"leveldb/utils"
 	"sync"
+
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 const htInitSlots = uint32(1 << 5)

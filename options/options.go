@@ -2,10 +2,11 @@ package options
 
 import (
 	"hash"
-	"leveldb/cache"
-	"leveldb/comparer"
-	"leveldb/filter"
-	"leveldb/storage"
+
+	"github.com/KierenEinar/leveldb/cache"
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/filter"
+	"github.com/KierenEinar/leveldb/storage"
 )
 
 const KLevelNum = 7

@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
-	"leveldb/cache"
-	"leveldb/errors"
-	"leveldb/options"
-	"leveldb/storage"
-	"leveldb/utils"
-	"leveldb/wal"
 	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/KierenEinar/leveldb/cache"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/storage"
+	"github.com/KierenEinar/leveldb/utils"
+	"github.com/KierenEinar/leveldb/wal"
 )
 
 type DBImpl struct {

@@ -1,12 +1,13 @@
 package collections
 
 import (
-	"leveldb/comparer"
-	"leveldb/errors"
-	"leveldb/iterator"
-	"leveldb/utils"
 	"math/rand"
 	"sync"
+
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/iterator"
+	"github.com/KierenEinar/leveldb/utils"
 )
 
 const (

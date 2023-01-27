@@ -5,15 +5,16 @@ import (
 	"container/list"
 	"encoding/binary"
 	"io"
-	"leveldb/collections"
-	"leveldb/comparer"
-	"leveldb/errors"
-	"leveldb/options"
-	"leveldb/storage"
-	"leveldb/utils"
-	"leveldb/wal"
 	"sort"
 	"sync"
+
+	"github.com/KierenEinar/leveldb/collections"
+	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/storage"
+	"github.com/KierenEinar/leveldb/utils"
+	"github.com/KierenEinar/leveldb/wal"
 )
 
 type VersionSet struct {

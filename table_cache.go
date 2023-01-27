@@ -2,13 +2,14 @@ package leveldb
 
 import (
 	"encoding/binary"
-	"leveldb/cache"
-	"leveldb/errors"
-	"leveldb/iterator"
-	"leveldb/options"
-	"leveldb/storage"
-	"leveldb/table"
 	"runtime"
+
+	"github.com/KierenEinar/leveldb/cache"
+	"github.com/KierenEinar/leveldb/errors"
+	"github.com/KierenEinar/leveldb/iterator"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/storage"
+	"github.com/KierenEinar/leveldb/table"
 )
 
 type TableCache struct {

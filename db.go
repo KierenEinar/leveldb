@@ -1,9 +1,9 @@
 package leveldb
 
 import (
-	"leveldb/options"
-	"leveldb/storage"
-	"leveldb/wal"
+	"github.com/KierenEinar/leveldb/options"
+	"github.com/KierenEinar/leveldb/storage"
+	"github.com/KierenEinar/leveldb/wal"
 )
 
 type DB interface {
