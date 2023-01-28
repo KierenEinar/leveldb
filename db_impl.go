@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"io"
 	"os"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -135,6 +136,27 @@ func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
 	}
 
 	return value, nil
+}
+
+func (dbImpl *DBImpl) Close() error {
+
+	if !atomic.CompareAndSwapUint32(&dbImpl.shuttingDown, 0, 1) {
+		return errors.ErrClosed
+	}
+
+	close(dbImpl.closed)
+
+	dbImpl.rwMutex.Lock()
+	defer dbImpl.rwMutex.Unlock()
+
+	for dbImpl.backgroundCompactionScheduled {
+		dbImpl.backgroundWorkFinishedSignal.Wait()
+	}
+
+	// todo
+
+	return nil
+
 }
 
 func memGet(mem *MemDB, ikey internalKey, value *[]byte, err *error) (ok bool) {
@@ -837,6 +859,7 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.tableOperation = newTableOperation(opt, db.tableCache)
 	db.scheduler = NewSchedule(db.closed)
+	runtime.SetFinalizer(db, (*DBImpl).Close)
 	return db
 }
 
