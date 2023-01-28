@@ -25,8 +25,8 @@ type DBImpl struct {
 
 	journalWriter *wal.JournalWriter
 
-	shutdown uint32
-	closed   chan struct{}
+	shuttingDown uint32
+	closed       chan struct{}
 	// these state are protect by mutex
 	seqNum    sequence
 	journalFd storage.Fd
@@ -155,7 +155,7 @@ func memGet(mem *MemDB, ikey internalKey, value *[]byte, err *error) (ok bool) {
 
 func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 
-	if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
+	if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
 		return errors.ErrClosed
 	}
 
@@ -232,8 +232,24 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	}
 
 	if dbImpl.writers.Front() != nil {
-		readyW := dbImpl.writers.Front().Value.(*writer)
-		readyW.cv.Signal()
+
+		select {
+		case <-dbImpl.closed:
+			for {
+				ready := dbImpl.writers.Front()
+				if ready == nil {
+					break
+				}
+				dbImpl.writers.Remove(ready)
+				readyW := dbImpl.writers.Front().Value.(*writer)
+				readyW.done = true
+				readyW.err = errors.ErrClosed
+				readyW.cv.Signal()
+			}
+		default:
+			readyW := dbImpl.writers.Front().Value.(*writer)
+			readyW.cv.Signal()
+		}
 	}
 
 	dbImpl.rwMutex.Unlock()
@@ -277,7 +293,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 				dbImpl.imm = imm
 
 				atomic.StoreUint32(&dbImpl.hasImm, 1)
-				mem := NewMemTable(int(dbImpl.opt.WriteBufferSize), dbImpl.opt.InternalComparer)
+				mem := dbImpl.NewMemTable(int(dbImpl.opt.WriteBufferSize), dbImpl.opt.InternalComparer)
 				mem.Ref()
 				dbImpl.mem = mem
 			} else {
@@ -359,7 +375,7 @@ func (dbImpl *DBImpl) maybeScheduleCompaction() {
 		// do nothing
 	} else if dbImpl.bgErr != nil {
 		// do nothing
-	} else if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
+	} else if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
 		// do nothing
 	} else if atomic.LoadUint32(&dbImpl.hasImm) == 0 && !dbImpl.versionSet.needCompaction() {
 		// do nothing
@@ -383,7 +399,7 @@ func (dbImpl *DBImpl) backgroundCall() {
 
 	if dbImpl.bgErr != nil {
 		// do nothing
-	} else if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
+	} else if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
 		// do nothing
 	} else {
 		dbImpl.backgroundCompaction()
@@ -446,7 +462,7 @@ func (dbImpl *DBImpl) compactMemTable() {
 	edit := &VersionEdit{}
 	err = dbImpl.writeLevel0Table(dbImpl.imm, edit)
 	if err == nil {
-		if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
+		if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
 			err = errors.ErrClosed
 			return
 		}
@@ -621,7 +637,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 		return err
 	}
 	journalReader := wal.NewJournalReader(reader)
-	memDB := NewMemTable(0, dbImpl.opt.InternalComparer)
+	memDB := dbImpl.NewMemTable(0, dbImpl.opt.InternalComparer)
 	memDB.Ref()
 	defer func() {
 		memDB.UnRef()
@@ -648,7 +664,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 					return err
 				}
 				memDB.UnRef()
-				memDB = NewMemTable(0, dbImpl.opt.InternalComparer)
+				memDB = dbImpl.NewMemTable(0, dbImpl.opt.InternalComparer)
 				memDB.Ref()
 			}
 
@@ -867,7 +883,7 @@ func (dbImpl *DBImpl) mPoolGet(n int) *MemDB {
 	}
 
 	if mdb == nil || mdb.Capacity() < n {
-		mdb = NewMemTable(n, dbImpl.opt.InternalComparer)
+		mdb = dbImpl.NewMemTable(n, dbImpl.opt.InternalComparer)
 	}
 	return mdb
 }

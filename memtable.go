@@ -16,13 +16,15 @@ type MemDB struct {
 	*utils.BasicReleaser
 }
 
-func NewMemTable(capacity int, cmp comparer.BasicComparer) *MemDB {
+func (db *DBImpl) NewMemTable(capacity int, cmp comparer.BasicComparer) *MemDB {
 	memDB := &MemDB{
 		SkipList:      collections.NewSkipList(time.Now().UnixNano(), capacity, cmp),
 		BasicReleaser: &utils.BasicReleaser{},
+		db:            db,
 	}
 	memDB.RegisterCleanUp(func(args ...interface{}) {
-
+		//memDB.reset()
+		db.mPoolPut(memDB)
 	})
 
 	return memDB

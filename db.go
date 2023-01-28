@@ -28,7 +28,7 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 	}
 
 	if dbImpl.mem == nil {
-		memDB := NewMemTable(0, opt.InternalComparer)
+		memDB := dbImpl.NewMemTable(0, opt.InternalComparer)
 		memDB.Ref()
 		dbImpl.mem = memDB
 

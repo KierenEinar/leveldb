@@ -241,7 +241,7 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 		lastSeq  sequence
 	)
 
-	for iter.Next() && iter.Valid() == nil && atomic.LoadUint32(&dbImpl.shutdown) == 0 {
+	for iter.Next() && iter.Valid() == nil && atomic.LoadUint32(&dbImpl.shuttingDown) == 0 {
 
 		if atomic.LoadUint32(&dbImpl.hasImm) == 1 {
 			dbImpl.rwMutex.Lock()
@@ -321,7 +321,7 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 
 	if err == nil {
 
-		if atomic.LoadUint32(&dbImpl.shutdown) == 1 {
+		if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
 			return errors.ErrClosed
 		}
 
