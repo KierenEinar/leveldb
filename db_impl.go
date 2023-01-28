@@ -94,22 +94,31 @@ func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
 	dbImpl.rwMutex.RUnlock()
 
 	ikey := buildInternalKey(nil, key, keyTypeSeek, seq)
+
 	var (
-		mErr  error
-		value []byte
+		mErr       error
+		value      []byte
+		havaUpdate bool
+		gStat      *GetStat
 	)
+
 	if memGet(mem, ikey, &value, &mErr) {
 		// done
 	} else if imm != nil && memGet(imm, ikey, &value, &mErr) {
 		// done
 	} else {
-		mErr = v.get(ikey, &value)
+		havaUpdate = true
+		gStat, mErr = v.get(ikey, &value)
 	}
 
 	dbImpl.rwMutex.Lock()
-	v.UnRef()
-	dbImpl.rwMutex.Unlock()
+	defer dbImpl.rwMutex.Unlock()
 
+	if havaUpdate && v.updateStat(gStat) {
+		dbImpl.maybeScheduleCompaction()
+	}
+
+	v.UnRef()
 	mem.UnRef()
 	if imm != nil {
 		imm.UnRef()

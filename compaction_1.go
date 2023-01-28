@@ -63,7 +63,7 @@ func (vSet *VersionSet) pickCompaction1() *compaction1 {
 			inputs = append(inputs, level[0])
 		}
 	} else if seekCompaction {
-		inputs = append(inputs, *version.fileToCompact)
+		inputs = append(inputs, version.fileToCompact)
 		sourceLevel = version.fileToCompactLevel
 	}
 

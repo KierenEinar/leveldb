@@ -119,7 +119,7 @@ func (builder *vBuilder) saveTo(v *Version) {
 			for i := beginPos; i < pos; i++ {
 				builder.maybeAddFile(v, baseFile[i], level)
 			}
-			builder.maybeAddFile(v, *tFile, level)
+			builder.maybeAddFile(v, tFile, level)
 			beginPos = pos
 		}
 
@@ -144,7 +144,7 @@ func upperBound(s tFiles, level int, tFile *tFile, cmp comparer.BasicComparer) i
 	return idx
 }
 
-func (builder *vBuilder) maybeAddFile(v *Version, file tFile, level int) {
+func (builder *vBuilder) maybeAddFile(v *Version, file *tFile, level int) {
 
 	if builder.deleted[level].contains(file.fd) {
 		return
@@ -644,6 +644,19 @@ func (v *Version) UnRef() int32 {
 	return res
 }
 
+func (v *Version) updateStat(gStat *GetStat) bool {
+	seekFile := gStat.SeekFile
+	if seekFile != nil {
+		seekFile.allowSeeks--
+		if seekFile.allowSeeks == 0 && v.fileToCompact == nil {
+			v.fileToCompact = seekFile
+			v.fileToCompactLevel = gStat.SeekFileLevel
+			return true
+		}
+	}
+	return false
+}
+
 type getStat uint8
 
 const (
@@ -653,13 +666,28 @@ const (
 	kStatCorruption
 )
 
-func (v *Version) get(ikey internalKey, value *[]byte) (err error) {
+func (v *Version) get(ikey internalKey, value *[]byte) (gStat *GetStat, err error) {
 
 	userKey := ikey.userKey()
 	stat := kStatNotFound
+	gStat = new(GetStat)
 
-	match := func(level int, tFile tFile) (continueLoop bool) {
+	var (
+		lastFileRead      *tFile
+		lastFileReadLevel int
+	)
+
+	match := func(level int, tFile *tFile) (continueLoop bool) {
 		v.vSet.tableCache.Get(ikey, tFile, func(rkey internalKey, rValue []byte, rErr error) {
+
+			if lastFileRead != nil {
+				gStat.SeekFile = lastFileRead
+				gStat.SeekFileLevel = lastFileReadLevel
+			}
+
+			lastFileRead = tFile
+			lastFileReadLevel = level
+
 			if rErr == errors.ErrNotFound {
 				stat = kStatNotFound
 				return
@@ -719,8 +747,8 @@ func (v *Version) get(ikey internalKey, value *[]byte) (err error) {
 	return
 }
 
-func (v *Version) foreachOverlapping(ikey internalKey, f func(level int, tFile tFile) (continueLoop bool)) {
-	tmp := make([]tFile, 0)
+func (v *Version) foreachOverlapping(ikey internalKey, f func(level int, tFile *tFile) (continueLoop bool)) {
+	tmp := make(tFiles, 0)
 	ukey := ikey.userKey()
 	for _, level0 := range v.levels[0] {
 		if bytes.Compare(level0.iMin.userKey(), ukey) <= 0 && bytes.Compare(level0.iMax.userKey(), ukey) >= 0 {

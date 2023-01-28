@@ -31,7 +31,7 @@ func NewTableCache(opt *options.Options) *TableCache {
 	return c
 }
 
-func (c *TableCache) Get(ikey internalKey, tFile tFile, f func(rkey internalKey, value []byte, err error)) {
+func (c *TableCache) Get(ikey internalKey, tFile *tFile, f func(rkey internalKey, value []byte, err error)) {
 	var cacheHandle *cache.LRUHandle
 	var err error
 	if err = c.findTable(tFile, &cacheHandle); err != nil {
@@ -49,7 +49,7 @@ func (c *TableCache) Get(ikey internalKey, tFile tFile, f func(rkey internalKey,
 	return
 }
 
-func (c *TableCache) NewIterator(tFile tFile) (iter iterator.Iterator, err error) {
+func (c *TableCache) NewIterator(tFile *tFile) (iter iterator.Iterator, err error) {
 	var cacheHandle *cache.LRUHandle
 	if err = c.findTable(tFile, &cacheHandle); err != nil {
 		return
@@ -78,7 +78,7 @@ func (c *TableCache) Evict(fd uint64) {
 	c.cache.Erase(lookupKey)
 }
 
-func (c *TableCache) findTable(tFile tFile, cacheHandle **cache.LRUHandle) (err error) {
+func (c *TableCache) findTable(tFile *tFile, cacheHandle **cache.LRUHandle) (err error) {
 	lookupKey := make([]byte, 8)
 	binary.LittleEndian.PutUint64(lookupKey, uint64(tFile.fd))
 	handle := c.cache.Lookup(lookupKey)

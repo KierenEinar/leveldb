@@ -44,7 +44,7 @@ func decodeTFile(buf []byte) *tFile {
 	return tFile
 }
 
-type tFiles []tFile
+type tFiles []*tFile
 
 func (sf tFiles) size() (size int) {
 	for _, v := range sf {
@@ -194,7 +194,7 @@ func (t *tWriter) finish() error {
 		return err
 	}
 
-	iter, err := t.tableCache.NewIterator(t.fileMeta)
+	iter, err := t.tableCache.NewIterator(&t.fileMeta)
 	if err == nil {
 		iter.UnRef()
 		t.fileMeta.iMax = t.last
