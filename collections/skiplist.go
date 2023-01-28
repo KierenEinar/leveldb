@@ -24,7 +24,6 @@ type SkipList struct {
 	tail      *skipListNode
 	kvData    []byte
 	length    int
-	kvSize    int
 
 	updateScratch [kMaxHeight]*skipListNode
 
@@ -76,7 +75,6 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 		replaceNode.kvOffset = len(skl.kvData)
 		skl.kvData = append(skl.kvData, key...)
 		skl.kvData = append(skl.kvData, value...)
-		skl.kvSize += len(key) + len(value)
 		replaceNode.valLen = len(value)
 		return
 	}
@@ -120,7 +118,6 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 
 	skl.kvData = append(skl.kvData, key...)
 	skl.kvData = append(skl.kvData, value...)
-	skl.kvSize += len(key) + len(value)
 	skl.length++
 	return
 }
@@ -218,7 +215,7 @@ func (skl *SkipList) FindGreaterOrEqual(key []byte) (*skipListNode, bool, error)
 func (skl *SkipList) Size() int {
 	skl.rwMutex.RLock()
 	defer skl.rwMutex.RUnlock()
-	return skl.kvSize
+	return len(skl.kvData)
 }
 
 func (skl *SkipList) Capacity() int {

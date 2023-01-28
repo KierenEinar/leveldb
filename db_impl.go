@@ -37,6 +37,8 @@ type DBImpl struct {
 	mem *MemDB
 	imm *MemDB
 
+	memPool chan *MemDB
+
 	backgroundWorkFinishedSignal *sync.Cond
 
 	backgroundCompactionScheduled bool
@@ -809,6 +811,7 @@ func newDBImpl(opt *options.Options) *DBImpl {
 		snapshots:      list.New(),
 		opt:            opt,
 		pendingOutputs: make(map[uint64]struct{}),
+		memPool:        make(chan *MemDB, 1),
 	}
 
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
@@ -840,5 +843,35 @@ func (dbImpl *DBImpl) cleanupCompaction(c *compaction1) {
 	if c.tWriter != nil {
 		_ = c.tWriter.w.Close()
 	}
+
+}
+
+func (dbImpl *DBImpl) mPoolPut(memDb *MemDB) bool {
+	select {
+	case <-dbImpl.closed:
+		return false
+	case dbImpl.memPool <- memDb:
+		return true
+	default:
+		return false
+	}
+}
+
+func (dbImpl *DBImpl) mPoolGet(n int) *MemDB {
+
+	var mdb *MemDB
+
+	select {
+	case mdb = <-dbImpl.memPool:
+	default:
+	}
+
+	if mdb == nil || mdb.Capacity() < n {
+		mdb = NewMemTable(n, dbImpl.opt.InternalComparer)
+	}
+	return mdb
+}
+
+func (dbImpl *DBImpl) mPoolDrain() {
 
 }

@@ -11,6 +11,7 @@ import (
 )
 
 type MemDB struct {
+	db *DBImpl
 	*collections.SkipList
 	*utils.BasicReleaser
 }
@@ -20,6 +21,10 @@ func NewMemTable(capacity int, cmp comparer.BasicComparer) *MemDB {
 		SkipList:      collections.NewSkipList(time.Now().UnixNano(), capacity, cmp),
 		BasicReleaser: &utils.BasicReleaser{},
 	}
+	memDB.RegisterCleanUp(func(args ...interface{}) {
+
+	})
+
 	return memDB
 }
 
