@@ -83,6 +83,10 @@ func (dbImpl *DBImpl) Del(key []byte) error {
 
 func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
 
+	if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
+		return nil, errors.ErrClosed
+	}
+
 	dbImpl.rwMutex.RLock()
 	v := dbImpl.versionSet.getCurrent()
 	mem := dbImpl.mem

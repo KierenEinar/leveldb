@@ -313,6 +313,10 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 		}
 	}
 
+	if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
+		err = errors.ErrClosed
+	}
+
 	if err == nil && c.tWriter != nil {
 		err = dbImpl.finishCompactionOutputFile(c)
 	}
@@ -320,10 +324,6 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 	dbImpl.rwMutex.Lock()
 
 	if err == nil {
-
-		if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
-			return errors.ErrClosed
-		}
 
 		for _, input := range c.inputs {
 			for which, table := range input {
