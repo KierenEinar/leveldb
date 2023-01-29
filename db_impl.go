@@ -50,6 +50,8 @@ type DBImpl struct {
 
 	writers *list.List
 
+	writersFinishedSignal *sync.Cond
+
 	// atomic state
 	hasImm uint32
 
@@ -149,6 +151,12 @@ func (dbImpl *DBImpl) Close() error {
 	dbImpl.rwMutex.Lock()
 	defer dbImpl.rwMutex.Unlock()
 
+	// wait write queue
+	for dbImpl.writers.Len() > 0 {
+		dbImpl.writersFinishedSignal.Wait()
+	}
+
+	// wait compaction
 	for dbImpl.backgroundCompactionScheduled {
 		dbImpl.backgroundWorkFinishedSignal.Wait()
 	}
@@ -257,9 +265,11 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 		}
 	}
 
-	if dbImpl.writers.Front() != nil {
+	if dbImpl.writers.Len() > 0 {
 		readyW := dbImpl.writers.Front().Value.(*writer)
 		readyW.cv.Signal()
+	} else {
+		dbImpl.writersFinishedSignal.Signal()
 	}
 
 	dbImpl.rwMutex.Unlock()
@@ -841,6 +851,7 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	}
 
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
+	db.writersFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.tableOperation = newTableOperation(opt, db.tableCache)
 	db.scheduler = NewSchedule(db.closed)
 	runtime.SetFinalizer(db, (*DBImpl).Close)
