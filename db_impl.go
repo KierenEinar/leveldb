@@ -841,7 +841,6 @@ func newDBImpl(opt *options.Options) *DBImpl {
 		versionSet: &VersionSet{
 			versions:    list.New(),
 			compactPtrs: [7]*compactPtr{},
-			tableCache:  NewTableCache(opt),
 			opt:         opt,
 		},
 		closed:         make(chan struct{}),
@@ -853,7 +852,9 @@ func newDBImpl(opt *options.Options) *DBImpl {
 		pendingOutputs: make(map[uint64]struct{}),
 		memPool:        make(chan *MemDB, 1),
 	}
-
+	tableCache := NewTableCache(opt)
+	db.versionSet.tableCache = tableCache
+	db.versionSet.tableOperation = newTableOperation(opt, tableCache)
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.writersFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.scheduler = NewSchedule(db.closed)
