@@ -248,7 +248,7 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 		readyW := ready.Value.(*writer)
 		if readyW != w {
 			readyW.done = true
-			readyW.err = errors.ErrClosed
+			readyW.err = err
 			readyW.cv.Signal()
 		}
 
