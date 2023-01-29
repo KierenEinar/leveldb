@@ -162,6 +162,12 @@ func (dbImpl *DBImpl) Close() error {
 
 	// todo
 
+	// version set close
+	dbImpl.versionSet.Close()
+
+	// block cache close
+	dbImpl.opt.BlockCache.Close()
+
 	return nil
 
 }

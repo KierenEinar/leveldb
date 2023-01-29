@@ -816,3 +816,8 @@ func (vSet *VersionSet) needCompaction() bool {
 
 	return false
 }
+
+func (vSet *VersionSet) Close() error {
+	vSet.tableCache.Close()
+	return nil
+}
