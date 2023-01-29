@@ -72,7 +72,11 @@ func (lb *LinkBlockBuffer) Grow(grow int) (n int, ok bool) {
 func (lb *LinkBlockBuffer) Write(p []byte) (int, error) {
 
 	if lb.cap-lb.writePos < len(p) {
-		grow := len(p) - (lb.cap - lb.writePos)
+		growCap := len(p) - (lb.cap - lb.writePos)
+		grow := 1 << 20 // 1m
+		if growCap > grow {
+			grow = growCap + grow
+		}
 		_, ok := lb.Grow(grow)
 		if !ok {
 			return 0, errors.New("LinkBlockBuffer Grow failed")

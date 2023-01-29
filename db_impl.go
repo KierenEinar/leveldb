@@ -258,24 +258,8 @@ func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 	}
 
 	if dbImpl.writers.Front() != nil {
-
-		select {
-		case <-dbImpl.closed:
-			for {
-				ready := dbImpl.writers.Front()
-				if ready == nil {
-					break
-				}
-				dbImpl.writers.Remove(ready)
-				readyW := dbImpl.writers.Front().Value.(*writer)
-				readyW.done = true
-				readyW.err = errors.ErrClosed
-				readyW.cv.Signal()
-			}
-		default:
-			readyW := dbImpl.writers.Front().Value.(*writer)
-			readyW.cv.Signal()
-		}
+		readyW := dbImpl.writers.Front().Value.(*writer)
+		readyW.cv.Signal()
 	}
 
 	dbImpl.rwMutex.Unlock()
