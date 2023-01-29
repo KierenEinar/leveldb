@@ -75,13 +75,16 @@ func (c *TableCache) releaseHandle(args ...interface{}) {
 func (c *TableCache) Evict(fd uint64) {
 	lookupKey := make([]byte, 8)
 	binary.LittleEndian.PutUint64(lookupKey, fd)
-	c.cache.Erase(lookupKey)
+	_, _ = c.cache.Erase(lookupKey)
 }
 
 func (c *TableCache) findTable(tFile *tFile, cacheHandle **cache.LRUHandle) (err error) {
 	lookupKey := make([]byte, 8)
 	binary.LittleEndian.PutUint64(lookupKey, uint64(tFile.fd))
-	handle := c.cache.Lookup(lookupKey)
+	handle, err := c.cache.Lookup(lookupKey)
+	if err != nil {
+		return
+	}
 	if handle == nil {
 		reader, err := c.opt.Storage.NewRandomAccessReader(storage.Fd{
 			FileType: storage.KTableFile,
@@ -94,7 +97,9 @@ func (c *TableCache) findTable(tFile *tFile, cacheHandle **cache.LRUHandle) (err
 		if err != nil {
 			return
 		}
-		handle = c.cache.Insert(lookupKey, 1, tReader, c.deleteEntry)
+		if handle, err = c.cache.Insert(lookupKey, 1, tReader, c.deleteEntry); err != nil {
+			return
+		}
 	}
 	*cacheHandle = handle
 	return

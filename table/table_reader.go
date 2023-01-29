@@ -367,15 +367,20 @@ func (reader *Reader) blockReader(bh blockHandle) (iter iterator.Iterator, err e
 		binary.LittleEndian.PutUint64(cacheKey[:8], reader.cacheId)
 		binary.LittleEndian.PutUint64(cacheKey[8:], bh.offset)
 
-		handle = reader.opt.BlockCache.Lookup(cacheKey)
+		handle, err = reader.opt.BlockCache.Lookup(cacheKey)
+		if err != nil {
+			return
+		}
 		if handle == nil {
 			if content, err = reader.readBlock(bh); err != nil {
 				return
 			}
 			if content.cacheable {
-				handle = reader.opt.BlockCache.Insert(cacheKey, uint32(len(content.data)), &content, func(key []byte, value interface{}) {
+				if handle, err = reader.opt.BlockCache.Insert(cacheKey, uint32(len(content.data)), &content, func(key []byte, value interface{}) {
 					releaseContent(value)
-				})
+				}); err != nil {
+					return
+				}
 			}
 		}
 	} else {
@@ -481,6 +486,9 @@ func (reader *Reader) Close(args ...interface{}) {
 			utils.PoolPutBytes(&reader.filterBlockReader.filterData.data)
 		}
 	}
+
+	_ = reader.r.Close()
+
 }
 
 type indexIter struct {

@@ -5,15 +5,17 @@ import (
 	hash2 "hash"
 	"sync"
 
+	"github.com/KierenEinar/leveldb/errors"
+
 	"github.com/KierenEinar/leveldb/utils"
 )
 
 const htInitSlots = uint32(1 << 5)
 
 type Cache interface {
-	Insert(key []byte, charge uint32, value interface{}, deleter func(key []byte, value interface{})) *LRUHandle
-	Lookup(key []byte) *LRUHandle
-	Erase(key []byte) *LRUHandle
+	Insert(key []byte, charge uint32, value interface{}, deleter func(key []byte, value interface{})) (*LRUHandle, error)
+	Lookup(key []byte) (*LRUHandle, error)
+	Erase(key []byte) (*LRUHandle, error)
 	Prune()
 	Close()
 	UnRef(h *LRUHandle)
@@ -149,16 +151,28 @@ type LRUCache struct {
 
 	// dummy head
 	lru LRUHandle
+
+	closed bool
 }
 
-func (lruCache *LRUCache) Close() {
-	lruCache.rwMutex.Lock()
-	for inUse := lruCache.inUse.next; inUse != &lruCache.inUse; inUse = inUse.next {
-		lruCache.finishErase(inUse)
+func (c *LRUCache) Close() {
+	c.rwMutex.Lock()
+	defer c.rwMutex.Unlock()
+
+	if c.closed {
+		return
 	}
-	utils.Assert(lruCache.inUse.next == &lruCache.inUse)
-	lruCache.rwMutex.Unlock()
-	lruCache.Prune()
+
+	c.closed = true
+
+	for next := c.lru.next; next != &c.lru; next = next.next {
+		c.finishErase(next)
+	}
+
+	for inUse := c.inUse.next; inUse != &c.inUse; inUse = inUse.next {
+		c.finishErase(inUse)
+	}
+
 }
 
 func newCache(capacity uint32) *LRUCache {
@@ -179,10 +193,14 @@ func newCache(capacity uint32) *LRUCache {
 }
 
 func (c *LRUCache) Insert(key []byte, hash uint32, charge uint32,
-	value interface{}, deleter func(key []byte, value interface{})) *LRUHandle {
+	value interface{}, deleter func(key []byte, value interface{})) (*LRUHandle, error) {
 
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
+
+	if c.closed {
+		return nil, errors.ErrClosed
+	}
 
 	handle := &LRUHandle{
 		hash:    hash,
@@ -202,31 +220,42 @@ func (c *LRUCache) Insert(key []byte, hash uint32, charge uint32,
 	for c.usage > c.capacity && c.lru.next != &c.lru {
 		c.finishErase(c.table.Erase(c.lru.next.key, c.lru.next.hash))
 	}
-	return handle
+	return handle, nil
 
 }
 
-func (c *LRUCache) Lookup(key []byte, hash uint32) *LRUHandle {
+func (c *LRUCache) Lookup(key []byte, hash uint32) (*LRUHandle, error) {
 	c.rwMutex.RLock()
 	defer c.rwMutex.RUnlock()
+	if c.closed {
+		return nil, errors.ErrClosed
+	}
 	h := c.table.Lookup(key, hash)
 	if h != nil {
 		c.Ref(h)
 	}
-	return h
+	return h, nil
 }
 
-func (c *LRUCache) Erase(key []byte, hash uint32) *LRUHandle {
+func (c *LRUCache) Erase(key []byte, hash uint32) (*LRUHandle, error) {
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
+	if c.closed {
+		return nil, errors.ErrClosed
+	}
 	h := c.table.Erase(key, hash)
 	c.finishErase(h)
-	return h
+	return h, nil
 }
 
 func (c *LRUCache) Prune() {
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
+
+	if c.closed {
+		return
+	}
+
 	for next := c.lru.next; next != &c.lru; next = next.next {
 		c.finishErase(next)
 	}
@@ -299,24 +328,24 @@ func NewCache(capacity uint32, hash32 hash2.Hash32) Cache {
 
 func (c *ShardedLRUCache) Close() {
 	for _, cache := range c.caches {
-		cache.Close()
+		go cache.Close()
 	}
 }
 
 func (c *ShardedLRUCache) Insert(key []byte, charge uint32,
-	value interface{}, deleter func(key []byte, value interface{})) *LRUHandle {
+	value interface{}, deleter func(key []byte, value interface{})) (*LRUHandle, error) {
 	hash := c.hash(key)
 	slot := hash & (1<<kNumShardBits - 1)
 	return c.caches[slot].Insert(key, hash, charge, value, deleter)
 }
 
-func (c *ShardedLRUCache) Lookup(key []byte) *LRUHandle {
+func (c *ShardedLRUCache) Lookup(key []byte) (*LRUHandle, error) {
 	hash := c.hash(key)
 	slot := hash & (1<<kNumShardBits - 1)
 	return c.caches[slot].Lookup(key, hash)
 }
 
-func (c *ShardedLRUCache) Erase(key []byte) *LRUHandle {
+func (c *ShardedLRUCache) Erase(key []byte) (*LRUHandle, error) {
 	hash := c.hash(key)
 	slot := hash & (1<<kNumShardBits - 1)
 	return c.caches[slot].Erase(key, hash)
@@ -324,7 +353,7 @@ func (c *ShardedLRUCache) Erase(key []byte) *LRUHandle {
 
 func (c *ShardedLRUCache) Prune() {
 	for _, cache := range c.caches {
-		cache.Prune()
+		go cache.Prune()
 	}
 }
 

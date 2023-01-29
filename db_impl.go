@@ -149,7 +149,6 @@ func (dbImpl *DBImpl) Close() error {
 	close(dbImpl.closed)
 
 	dbImpl.rwMutex.Lock()
-	defer dbImpl.rwMutex.Unlock()
 
 	// wait write queue
 	for dbImpl.writers.Len() > 0 {
@@ -160,6 +159,8 @@ func (dbImpl *DBImpl) Close() error {
 	for dbImpl.backgroundCompactionScheduled {
 		dbImpl.backgroundWorkFinishedSignal.Wait()
 	}
+
+	dbImpl.rwMutex.Unlock()
 
 	// todo
 
