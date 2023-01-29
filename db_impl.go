@@ -55,9 +55,7 @@ type DBImpl struct {
 	// atomic state
 	hasImm uint32
 
-	tableOperation *tableOperation
-	tableCache     *TableCache
-	snapshots      *list.List
+	snapshots *list.List
 
 	scheduler *Scheduler
 
@@ -520,7 +518,7 @@ func (dbImpl *DBImpl) writeLevel0Table(memDb *MemDB, edit *VersionEdit) (err err
 		}
 	}()
 
-	tWriter, err := dbImpl.tableOperation.create(fileMeta)
+	tWriter, err := dbImpl.versionSet.tableOperation.create(fileMeta)
 	if err != nil {
 		return err
 	}
@@ -757,7 +755,7 @@ func (dbImpl *DBImpl) removeObsoleteFiles() (err error) {
 		}
 
 		if fd.FileType == storage.KTableFile {
-			dbImpl.tableCache.Evict(fd.Num)
+			dbImpl.versionSet.tableCache.Evict(fd.Num)
 		}
 	}
 
@@ -844,7 +842,6 @@ func newDBImpl(opt *options.Options) *DBImpl {
 		scratchBatch:   NewWriteBatch(),
 		writers:        list.New(),
 		hasImm:         0,
-		tableCache:     NewTableCache(opt),
 		snapshots:      list.New(),
 		opt:            opt,
 		pendingOutputs: make(map[uint64]struct{}),
@@ -853,7 +850,6 @@ func newDBImpl(opt *options.Options) *DBImpl {
 
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.writersFinishedSignal = sync.NewCond(&db.rwMutex)
-	db.tableOperation = newTableOperation(opt, db.tableCache)
 	db.scheduler = NewSchedule(db.closed)
 	runtime.SetFinalizer(db, (*DBImpl).Close)
 	return db
