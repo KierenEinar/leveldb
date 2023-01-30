@@ -74,7 +74,7 @@ func (dbImpl *DBImpl) Put(key []byte, value []byte) error {
 	return dbImpl.write(wb)
 }
 
-func (dbImpl *DBImpl) Del(key []byte) error {
+func (dbImpl *DBImpl) Delete(key []byte) error {
 	wb := NewWriteBatch()
 	if err := wb.Delete(key); err != nil {
 		return err
