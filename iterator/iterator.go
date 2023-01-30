@@ -1,7 +1,6 @@
 package iterator
 
 import (
-	"github.com/KierenEinar/leveldb/collections"
 	"github.com/KierenEinar/leveldb/comparer"
 	"github.com/KierenEinar/leveldb/errors"
 	"github.com/KierenEinar/leveldb/utils"
@@ -196,7 +195,7 @@ type MergeIterator struct {
 	*utils.BasicReleaser
 	err     error
 	iters   []Iterator
-	heap    *collections.Heap
+	heap    *Heap
 	keys    [][]byte
 	iterIdx int // current iter need to fill the heap
 	dir     Direction
@@ -214,7 +213,7 @@ func NewMergeIterator(iters []Iterator, cmp comparer.Comparer) *MergeIterator {
 		cmp:   cmp,
 	}
 
-	mi.heap = collections.InitHeap(mi.minHeapLess)
+	mi.heap = InitHeap(mi.minHeapLess)
 	mi.OnClose = func() {
 		mi.heap.Clear()
 		for i := range iters {

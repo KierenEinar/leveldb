@@ -206,8 +206,9 @@ func decodeBatchData(r storage.SequentialReader, wb *WriteBatch) (err error) {
 	}
 
 	if kt == byte(keyTypeValue) {
-		vLen, err := binary.ReadUvarint(r)
-		if err != nil {
+		vLen, rErr := binary.ReadUvarint(r)
+		if rErr != nil {
+			err = rErr
 			return
 		}
 		value := utils.PoolGetBytes(int(vLen))

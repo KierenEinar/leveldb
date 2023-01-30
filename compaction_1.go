@@ -352,7 +352,7 @@ func (c *compaction1) makeInputIterator() (iter iterator.Iterator, err error) {
 	for which, inputs := range c.inputs {
 		if c.sourceLevel+which == 0 {
 			for _, input := range inputs {
-				iter, err := c.tableCache.NewIterator(input)
+				iter, err = c.tableCache.NewIterator(input)
 				if err != nil {
 					return
 				}

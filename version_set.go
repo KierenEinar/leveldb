@@ -540,11 +540,12 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	journalReader := wal.NewJournalReader(reader)
 	for {
 
-		chunkReader, err := journalReader.NextChunk()
-		if err == io.EOF {
+		chunkReader, cErr := journalReader.NextChunk()
+		if cErr == io.EOF {
 			break
 		}
-		if err != nil {
+		if cErr != nil {
+			err = cErr
 			return
 		}
 

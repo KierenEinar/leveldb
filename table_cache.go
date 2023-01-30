@@ -86,15 +86,17 @@ func (c *TableCache) findTable(tFile *tFile, cacheHandle **cache.LRUHandle) (err
 		return
 	}
 	if handle == nil {
-		reader, err := c.opt.Storage.NewRandomAccessReader(storage.Fd{
+		reader, rErr := c.opt.Storage.NewRandomAccessReader(storage.Fd{
 			FileType: storage.KTableFile,
 			Num:      uint64(tFile.fd),
 		})
-		if err != nil {
+		if rErr != nil {
+			err = rErr
 			return
 		}
-		tReader, err := table.NewTableReader(c.opt, reader, tFile.size)
-		if err != nil {
+		tReader, rErr := table.NewTableReader(c.opt, reader, tFile.size)
+		if rErr != nil {
+			err = rErr
 			return
 		}
 		if handle, err = c.cache.Insert(lookupKey, 1, tReader, c.deleteEntry); err != nil {

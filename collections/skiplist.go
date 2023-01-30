@@ -241,7 +241,6 @@ type SkipListIter struct {
 	skl *SkipList
 	n   *skipListNode
 	dir iterator.Direction
-	iterator.Iterator
 	*utils.BasicReleaser
 	iterErr error
 }

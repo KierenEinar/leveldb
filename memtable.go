@@ -48,8 +48,9 @@ func (memTable *MemDB) Find(ikey internalKey) (rkey []byte, value []byte, err er
 	}
 	if node != nil { // node is ge ikey
 		ikeyN := memTable.SkipList.Key(node)
-		ukey, kt, _, err := parseInternalKey(ikeyN)
-		if err != nil {
+		ukey, kt, _, parseErr := parseInternalKey(ikeyN)
+		if parseErr != nil {
+			err = parseErr
 			return
 		}
 		if bytes.Compare(ukey, ikey.userKey()) == 0 {

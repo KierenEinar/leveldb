@@ -1,4 +1,4 @@
-package collections
+package iterator
 
 type HeapLess func(data []interface{}, i, j int) bool
 

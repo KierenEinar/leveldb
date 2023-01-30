@@ -37,8 +37,9 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 			FileType: storage.KJournalFile,
 			Num:      dbImpl.versionSet.allocFileNum(),
 		}
-		sequentialWriter, err := dbImpl.opt.Storage.NewAppendableFile(journalFd)
-		if err != nil {
+		sequentialWriter, wErr := dbImpl.opt.Storage.NewAppendableFile(journalFd)
+		if wErr != nil {
+			err = wErr
 			return
 		}
 
