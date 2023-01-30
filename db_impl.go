@@ -84,7 +84,7 @@ func (dbImpl *DBImpl) Delete(key []byte) error {
 
 func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
 
-	if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
+	if !dbImpl.ok() {
 		return nil, errors.ErrClosed
 	}
 
@@ -191,7 +191,7 @@ func memGet(mem *MemDB, ikey internalKey, value *[]byte, err *error) (ok bool) {
 
 func (dbImpl *DBImpl) write(batch *WriteBatch) error {
 
-	if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
+	if !dbImpl.ok() {
 		return errors.ErrClosed
 	}
 
@@ -914,4 +914,8 @@ func (dbImpl *DBImpl) mPoolGet(n int) *MemDB {
 
 func (dbImpl *DBImpl) mPoolDrain() {
 
+}
+
+func (dbImpl *DBImpl) ok() bool {
+	return atomic.LoadUint32(&dbImpl.shuttingDown) == 0
 }
