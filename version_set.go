@@ -8,6 +8,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/KierenEinar/leveldb/cache"
+
 	"github.com/KierenEinar/leveldb/collections"
 	"github.com/KierenEinar/leveldb/comparer"
 	"github.com/KierenEinar/leveldb/errors"
@@ -32,8 +34,8 @@ type VersionSet struct {
 	writer         storage.SequentialWriter
 	tableOperation *tableOperation
 	tableCache     *TableCache
-
-	opt *options.Options
+	blockCache     cache.Cache
+	opt            *options.Options
 }
 
 type Version struct {
@@ -819,5 +821,6 @@ func (vSet *VersionSet) needCompaction() bool {
 
 func (vSet *VersionSet) Close() error {
 	vSet.tableCache.Close()
+	vSet.blockCache.Close()
 	return nil
 }

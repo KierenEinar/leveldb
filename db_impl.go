@@ -160,13 +160,10 @@ func (dbImpl *DBImpl) Close() error {
 
 	dbImpl.rwMutex.Unlock()
 
-	// todo
+	// closed writers
 
 	// version set close
 	dbImpl.versionSet.Close()
-
-	// block cache close
-	dbImpl.opt.BlockCache.Close()
 
 	return nil
 
@@ -854,6 +851,7 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	}
 	tableCache := NewTableCache(opt)
 	db.versionSet.tableCache = tableCache
+	db.versionSet.blockCache = opt.BlockCache
 	db.versionSet.tableOperation = newTableOperation(opt, tableCache)
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.writersFinishedSignal = sync.NewCond(&db.rwMutex)

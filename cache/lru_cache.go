@@ -327,9 +327,17 @@ func NewCache(capacity uint32, hash32 hash2.Hash32) Cache {
 }
 
 func (c *ShardedLRUCache) Close() {
-	for _, cache := range c.caches {
-		go cache.Close()
+	wg := sync.WaitGroup{}
+	wg.Add(len(c.caches))
+
+	for idx := range c.caches {
+		go func(c *LRUCache) {
+			defer wg.Done()
+			c.Close()
+		}(c.caches[idx])
 	}
+
+	wg.Wait()
 }
 
 func (c *ShardedLRUCache) Insert(key []byte, charge uint32,
