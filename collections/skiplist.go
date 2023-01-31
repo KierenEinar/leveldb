@@ -224,6 +224,19 @@ func (skl *SkipList) Capacity() int {
 	return cap(skl.kvData)
 }
 
+func (skl *SkipList) Reset() {
+	skl.rwMutex.RLock()
+	defer skl.rwMutex.RUnlock()
+	skl.level = 0
+	skl.kvData = skl.kvData[:0]
+	skl.dummyHead = &skipListNode{}
+	skl.tail = nil
+	skl.length = 0
+	seed := skl.seed>>17 | skl.seed<<15 + 0xf175
+	skl.seed += seed
+	skl.rand = rand.New(rand.NewSource(skl.seed))
+}
+
 // NewIterator return an iter
 // caller should call UnRef after iterate end
 func (skl *SkipList) NewIterator() iterator.Iterator {

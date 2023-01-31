@@ -23,8 +23,9 @@ func (dbImpl *DBImpl) NewMemTable(capacity int, cmp comparer.BasicComparer) *Mem
 		db:            dbImpl,
 	}
 	memDB.RegisterCleanUp(func(args ...interface{}) {
-		//memDB.reset()
-		dbImpl.mPoolPut(memDB)
+		db := memDB.db
+		memDB.Reset()
+		db.mPoolPut(memDB)
 	})
 
 	return memDB

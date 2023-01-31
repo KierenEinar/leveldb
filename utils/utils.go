@@ -46,12 +46,12 @@ func (br *BasicReleaser) UnRef() int32 {
 		br.OnUnRef()
 	}
 	if newInt32 == 0 {
+		atomic.StoreUint32(&br.release, 1)
 		if br.OnClose != nil {
-			atomic.StoreUint32(&br.release, 1)
 			br.OnClose()
-			node := br.dummyCleanUpNode.next
-			node.doClean()
 		}
+		node := br.dummyCleanUpNode.next
+		node.doClean()
 	}
 	return newInt32
 }
@@ -78,9 +78,8 @@ func (br *BasicReleaser) RegisterCleanUp(f func(args ...interface{}), args ...in
 		f:    f,
 		args: args,
 	}
-	if br.dummyCleanUpNode.next != nil {
-		nextNode.next = br.dummyCleanUpNode.next
-	}
+
+	nextNode.next = br.dummyCleanUpNode.next
 	br.dummyCleanUpNode.next = nextNode
 	return
 }
@@ -89,6 +88,6 @@ func (node *cleanUpNode) doClean() {
 	n := node
 	for n != nil {
 		n.f(n.args...)
-		n = node.next
+		n = n.next
 	}
 }

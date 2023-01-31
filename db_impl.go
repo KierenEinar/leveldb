@@ -160,7 +160,10 @@ func (dbImpl *DBImpl) Close() error {
 
 	dbImpl.rwMutex.Unlock()
 
-	// closed writers
+	// close journal writer
+	if dbImpl.journalWriter != nil {
+		_ = dbImpl.journalWriter.Close()
+	}
 
 	// version set close
 	dbImpl.versionSet.Close()
@@ -315,7 +318,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 				dbImpl.imm = imm
 
 				atomic.StoreUint32(&dbImpl.hasImm, 1)
-				mem := dbImpl.NewMemTable(int(dbImpl.opt.WriteBufferSize), dbImpl.opt.InternalComparer)
+				mem := dbImpl.mPoolGet(int(dbImpl.opt.WriteBufferSize))
 				mem.Ref()
 				dbImpl.mem = mem
 			} else {
@@ -659,7 +662,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 		return err
 	}
 	journalReader := wal.NewJournalReader(reader)
-	memDB := dbImpl.NewMemTable(0, dbImpl.opt.InternalComparer)
+	memDB := dbImpl.mPoolGet(0)
 	memDB.Ref()
 	defer func() {
 		memDB.UnRef()
@@ -686,7 +689,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 					return err
 				}
 				memDB.UnRef()
-				memDB = dbImpl.NewMemTable(0, dbImpl.opt.InternalComparer)
+				memDB = dbImpl.mPoolGet(0)
 				memDB.Ref()
 			}
 
@@ -914,6 +917,24 @@ func (dbImpl *DBImpl) mPoolGet(n int) *MemDB {
 
 func (dbImpl *DBImpl) mPoolDrain() {
 
+	ticker := time.NewTicker(time.Second * 30)
+
+	for {
+		select {
+		case <-ticker.C:
+			select {
+			case <-dbImpl.memPool:
+			default:
+			}
+		case <-dbImpl.closed:
+			ticker.Stop()
+			select {
+			case <-dbImpl.memPool:
+			default:
+			}
+			close(dbImpl.memPool)
+		}
+	}
 }
 
 func (dbImpl *DBImpl) ok() bool {

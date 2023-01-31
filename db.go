@@ -29,7 +29,7 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 	}
 
 	if dbImpl.mem == nil {
-		memDB := dbImpl.NewMemTable(0, opt.InternalComparer)
+		memDB := dbImpl.mPoolGet(0)
 		memDB.Ref()
 		dbImpl.mem = memDB
 
@@ -61,7 +61,9 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 		//todo warm log
 		err = nil
 	}
+
 	dbImpl.maybeScheduleCompaction()
+	go dbImpl.mPoolDrain()
 	db = dbImpl
 	return
 }
