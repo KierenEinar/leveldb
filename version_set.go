@@ -677,6 +677,10 @@ const (
 
 func (v *Version) get(ikey internalKey, value *[]byte) (gStat *GetStat, err error) {
 
+	if v.closed {
+		return nil, errors.ErrClosed
+	}
+
 	userKey := ikey.userKey()
 	stat := kStatNotFound
 	gStat = new(GetStat)
@@ -832,14 +836,10 @@ func (vSet *VersionSet) release(mu *sync.RWMutex) error {
 	vSet.tableCache.Close()
 	vSet.blockCache.Close()
 	mu.Lock()
-	vSet.appendVersion(&Version{
-		closed:        true,
-		vSet:          vSet,
-		BasicReleaser: &utils.BasicReleaser{},
-		levels:        [options.KLevelNum]tFiles{},
-	})
 
-	mu.Unlock()
+	version := newVersion(vSet)
+	version.closed = true
+	vSet.appendVersion(version)
 
 	return nil
 }
