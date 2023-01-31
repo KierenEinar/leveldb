@@ -232,7 +232,7 @@ func (skl *SkipList) Reset() {
 	skl.dummyHead = &skipListNode{}
 	skl.tail = nil
 	skl.length = 0
-	seed := skl.seed>>17 | skl.seed<<15 + 0xf175
+	seed := skl.seed>>15 | skl.seed<<17 + 0xf175
 	skl.seed += seed
 	skl.rand = rand.New(rand.NewSource(skl.seed))
 }
