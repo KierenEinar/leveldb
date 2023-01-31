@@ -85,59 +85,12 @@ func (dbImpl *DBImpl) Delete(key []byte) error {
 }
 
 func (dbImpl *DBImpl) Get(key []byte) ([]byte, error) {
-
 	if !dbImpl.ok() {
 		return nil, errors.ErrClosed
 	}
-
-	dbImpl.rwMutex.RLock()
-	v := dbImpl.versionSet.getCurrent()
-	mem := dbImpl.mem
-	imm := dbImpl.imm
-	v.Ref()
-	mem.Ref()
-	if imm != nil {
-		imm.Ref()
-	}
-	seq := dbImpl.seqNum
-	dbImpl.rwMutex.RUnlock()
-
-	ikey := buildInternalKey(nil, key, keyTypeSeek, seq)
-
-	var (
-		mErr       error
-		value      []byte
-		havaUpdate bool
-		gStat      *GetStat
-	)
-
-	if memGet(mem, ikey, &value, &mErr) {
-		// done
-	} else if imm != nil && memGet(imm, ikey, &value, &mErr) {
-		// done
-	} else {
-		havaUpdate = true
-		gStat, mErr = v.get(ikey, &value)
-	}
-
-	dbImpl.rwMutex.Lock()
-	defer dbImpl.rwMutex.Unlock()
-
-	if havaUpdate && v.updateStat(gStat) {
-		dbImpl.maybeScheduleCompaction()
-	}
-
-	v.UnRef()
-	mem.UnRef()
-	if imm != nil {
-		imm.UnRef()
-	}
-
-	if mErr != nil {
-		return nil, mErr
-	}
-
-	return value, nil
+	snapshot := dbImpl.acquireSnapshot()
+	defer dbImpl.releaseSnapshot(snapshot)
+	return dbImpl.get(snapshot.seq, key)
 }
 
 func (dbImpl *DBImpl) Close() error {
@@ -182,6 +135,58 @@ func (dbImpl *DBImpl) Close() error {
 
 	return nil
 
+}
+
+func (dbImpl *DBImpl) get(seq sequence, key []byte) ([]byte, error) {
+
+	dbImpl.rwMutex.RLock()
+	v := dbImpl.versionSet.getCurrent()
+	mem := dbImpl.mem
+	imm := dbImpl.imm
+	v.Ref()
+	mem.Ref()
+	if imm != nil {
+		imm.Ref()
+	}
+
+	dbImpl.rwMutex.RUnlock()
+
+	ikey := buildInternalKey(nil, key, keyTypeSeek, seq)
+
+	var (
+		mErr       error
+		value      []byte
+		havaUpdate bool
+		gStat      *GetStat
+	)
+
+	if memGet(mem, ikey, &value, &mErr) {
+		// done
+	} else if imm != nil && memGet(imm, ikey, &value, &mErr) {
+		// done
+	} else {
+		havaUpdate = true
+		gStat, mErr = v.get(ikey, &value)
+	}
+
+	dbImpl.rwMutex.Lock()
+	defer dbImpl.rwMutex.Unlock()
+
+	if havaUpdate && v.updateStat(gStat) {
+		dbImpl.maybeScheduleCompaction()
+	}
+
+	v.UnRef()
+	mem.UnRef()
+	if imm != nil {
+		imm.UnRef()
+	}
+
+	if mErr != nil {
+		return nil, mErr
+	}
+
+	return value, nil
 }
 
 func memGet(mem *MemDB, ikey internalKey, value *[]byte, err *error) (ok bool) {
