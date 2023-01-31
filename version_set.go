@@ -841,5 +841,10 @@ func (vSet *VersionSet) release(mu *sync.RWMutex) error {
 	version.closed = true
 	vSet.appendVersion(version)
 
+	if vSet.manifestWriter != nil {
+		_ = vSet.manifestWriter.Close()
+		vSet.manifestWriter = nil
+	}
+
 	return nil
 }

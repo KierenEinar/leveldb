@@ -167,10 +167,16 @@ func (dbImpl *DBImpl) Close() error {
 
 	dbImpl.rwMutex.Lock()
 
+	dbImpl.mem.UnRef()
+	if dbImpl.imm != nil {
+		dbImpl.imm.UnRef()
+	}
+
 	// version set close
 	_ = dbImpl.versionSet.release(&dbImpl.rwMutex)
 
-	dbImpl.rwMutex.Unlock()
+	dbImpl.mem = nil
+	dbImpl.imm = nil
 
 	return nil
 
