@@ -57,6 +57,8 @@ type DBImpl struct {
 
 	snapshots *list.List
 
+	snapsMu sync.RWMutex
+
 	scheduler *Scheduler
 
 	opt *options.Options
@@ -949,4 +951,8 @@ func (dbImpl *DBImpl) mPoolDrain() {
 
 func (dbImpl *DBImpl) ok() bool {
 	return atomic.LoadUint32(&dbImpl.shuttingDown) == 0
+}
+
+func (dbImpl *DBImpl) getSeq() sequence {
+	return sequence(atomic.LoadUint64((*uint64)(&dbImpl.seqNum)))
 }
