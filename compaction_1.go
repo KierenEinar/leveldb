@@ -40,7 +40,7 @@ type compaction1 struct {
 
 func (vSet *VersionSet) pickCompaction1() *compaction1 {
 
-	version := vSet.current
+	version := vSet.getCurrent()
 	version.Ref()
 
 	sizeCompaction := version.cScore >= 1
@@ -68,7 +68,7 @@ func (vSet *VersionSet) pickCompaction1() *compaction1 {
 	}
 
 	return newCompaction1(inputs, sourceLevel, version, vSet.tableOperation,
-		vSet.current.levels, vSet.opt)
+		version.levels, vSet.opt)
 }
 
 func newCompaction1(inputs tFiles, sourceLevel int, version *Version, tableOperation *tableOperation,

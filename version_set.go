@@ -31,7 +31,6 @@ type VersionSet struct {
 	stSeqNum       sequence // current memtable start seq num
 	manifestFd     storage.Fd
 	manifestWriter *wal.JournalWriter
-	writer         storage.SequentialWriter
 	tableOperation *tableOperation
 	tableCache     *TableCache
 	blockCache     cache.Cache
@@ -43,6 +42,8 @@ type Version struct {
 	vSet    *VersionSet
 	*utils.BasicReleaser
 	levels [options.KLevelNum]tFiles
+
+	closed bool
 
 	// compaction
 	cScore float64
@@ -339,7 +340,7 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 
 	/**
 	case 1: compactMemtable
-		edit.setReq(db.frozenSeqNum)
+		edit.setSeq(db.frozenSeqNum)
 		edit.setJournalNum(db.journal.Fd)
 		edit.addTable(xx)
 
@@ -365,8 +366,6 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 	} else {
 		edit.lastSeq = vSet.stSeqNum
 	}
-
-	edit.setNextFile(vSet.nextFileNum)
 
 	// apply new version
 	v := newVersion(vSet)
@@ -399,6 +398,8 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 		}
 	}
 
+	edit.setNextFile(vSet.nextFileNum)
+
 	if newManifest {
 		writer, err = stor.NewAppendableFile(manifestFd)
 		if err == nil {
@@ -423,7 +424,7 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 	if err == nil && newManifest {
 		err = stor.SetCurrent(manifestFd.Num)
 		if err == nil {
-			_ = vSet.writer.Close()
+			_ = vSet.manifestWriter.Close()
 		}
 	}
 
@@ -432,15 +433,16 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 	if err == nil {
 		if newManifest {
 			vSet.manifestWriter = manifestWriter
-			vSet.writer = writer
 		}
 		vSet.appendVersion(v)
 		vSet.stSeqNum = edit.lastSeq
 		vSet.stJournalNum = edit.journalNum
 	} else {
-		if newManifest && writer != vSet.writer {
-			_ = writer.Close()
-			_ = stor.Remove(manifestFd)
+		if newManifest && manifestWriter != vSet.manifestWriter {
+			if manifestWriter != nil {
+				_ = manifestWriter.Close()
+				_ = stor.Remove(manifestFd)
+			}
 		}
 	}
 
@@ -468,7 +470,11 @@ func (vSet *VersionSet) writeSnapShot(w io.Writer) error {
 		edit.addCompactPtr(cPtr.level, cPtr.ikey)
 	}
 
-	for level, fileMetas := range vSet.current.levels {
+	version := vSet.getCurrent()
+	version.Ref()
+	defer version.UnRef()
+
+	for level, fileMetas := range version.levels {
 		for _, fileMeta := range fileMetas {
 			edit.addNewTable(level, fileMeta.size, uint64(fileMeta.fd), fileMeta.iMin, fileMeta.iMax)
 		}
@@ -510,10 +516,10 @@ func finalize(v *Version) {
 }
 
 func (vSet *VersionSet) levelFilesNum(level int) int {
-	c := vSet.current
-	c.Ref()
-	defer c.UnRef()
-	return len(c.levels[level])
+	version := vSet.getCurrent()
+	version.Ref()
+	defer version.UnRef()
+	return len(version.levels[level])
 }
 
 func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
@@ -805,7 +811,7 @@ func (vSet *VersionSet) markFileUsed(fileNum uint64) bool {
 
 func (vSet *VersionSet) needCompaction() bool {
 
-	current := vSet.current
+	current := vSet.getCurrent()
 	current.Ref()
 	defer current.UnRef()
 
@@ -820,8 +826,20 @@ func (vSet *VersionSet) needCompaction() bool {
 	return false
 }
 
-func (vSet *VersionSet) Close() error {
+func (vSet *VersionSet) release(mu *sync.RWMutex) error {
+
+	mu.Unlock()
 	vSet.tableCache.Close()
 	vSet.blockCache.Close()
+	mu.Lock()
+	vSet.appendVersion(&Version{
+		closed:        true,
+		vSet:          vSet,
+		BasicReleaser: &utils.BasicReleaser{},
+		levels:        [options.KLevelNum]tFiles{},
+	})
+
+	mu.Unlock()
+
 	return nil
 }

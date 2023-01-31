@@ -165,8 +165,12 @@ func (dbImpl *DBImpl) Close() error {
 		_ = dbImpl.journalWriter.Close()
 	}
 
+	dbImpl.rwMutex.Lock()
+
 	// version set close
-	dbImpl.versionSet.Close()
+	_ = dbImpl.versionSet.release(&dbImpl.rwMutex)
+
+	dbImpl.rwMutex.Unlock()
 
 	return nil
 
