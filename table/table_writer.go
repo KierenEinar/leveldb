@@ -176,7 +176,7 @@ func (bw *blockWriter) writeEntry(key []byte, value []byte) {
 		shareUKey     = bw.comparer.Prefix(bw.prevKey.Bytes(), key)
 		shareUKeyLen  = len(shareUKey)
 		unShareKeyLen = len(key) - shareUKeyLen
-		unShareKey    = key[unShareKeyLen:]
+		unShareKey    = key[shareUKeyLen:]
 		vLen          = len(value)
 	)
 

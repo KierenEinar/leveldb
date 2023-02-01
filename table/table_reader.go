@@ -161,7 +161,7 @@ func (bi *blockIter) Next() bool {
 	ikey := append(bi.prevKey[:shareKeyLen], unShareKey...)
 	bi.ikey = ikey
 	bi.value = value
-
+	bi.prevKey = ikey
 	bi.offset = bi.offset + entryLen
 	return true
 }
