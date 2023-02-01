@@ -165,7 +165,7 @@ func maxOpenFile() int {
 	err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, rlimit)
 	if err != nil {
 		gOpenReadOnlyFileLimit = 50
-	} else if rlimit.Cur == syscall.RLIM_INFINITY {
+	} else if int(rlimit.Cur) == syscall.RLIM_INFINITY {
 		gOpenReadOnlyFileLimit = math.MaxInt64
 	} else {
 		gOpenReadOnlyFileLimit = int(rlimit.Cur / 5)
