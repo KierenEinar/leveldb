@@ -138,6 +138,8 @@ func (dbImpl *DBImpl) Close() error {
 	_ = dbImpl.opt.Storage.UnLockFile(dbImpl.dbLock)
 	_ = dbImpl.opt.Storage.Close()
 
+	runtime.SetFinalizer(dbImpl, nil)
+
 	return nil
 
 }
