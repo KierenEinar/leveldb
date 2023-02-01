@@ -133,6 +133,11 @@ func (dbImpl *DBImpl) Close() error {
 	dbImpl.mem = nil
 	dbImpl.imm = nil
 
+	dbImpl.rwMutex.Unlock()
+
+	_ = dbImpl.opt.Storage.UnLockFile(dbImpl.dbLock)
+	_ = dbImpl.opt.Storage.Close()
+
 	return nil
 
 }
@@ -875,6 +880,7 @@ func newDBImpl(opt *options.Options) *DBImpl {
 	db.versionSet.tableOperation = newTableOperation(opt, tableCache)
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.writersFinishedSignal = sync.NewCond(&db.rwMutex)
+	db.readersFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.scheduler = NewSchedule(db.closed)
 	runtime.SetFinalizer(db, (*DBImpl).Close)
 	return db
