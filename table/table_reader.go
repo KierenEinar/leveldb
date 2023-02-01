@@ -196,11 +196,11 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 		footerBlockContent blockContent
 		indexBlockContent  blockContent
 		footer             = make([]byte, kTableFooterLen)
-		footerData         *[]byte
+		footerData         []byte
 		indexBlock         *dataBlock
 	)
 
-	_, err = r.Pread(int64(fileSize-kTableFooterLen), &footerData, &footer)
+	footerData, err = r.Pread(footer, int64(fileSize-kTableFooterLen))
 	if err != nil {
 		return
 	}
@@ -215,7 +215,7 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 	tr.Ref()
 	tr.RegisterCleanUp(tr.Close)
 
-	footerBlockContent.data = *footerData
+	footerBlockContent.data = footerData
 	err = tr.readFooter(footerBlockContent)
 	if err != nil {
 		return
@@ -273,7 +273,7 @@ func (reader *Reader) readMeta() (err error) {
 
 	defer func() {
 		if metaContent.poolable {
-			utils.PoolPutBytes(&metaContent.data)
+			utils.PoolPutBytes(metaContent.data)
 		}
 	}()
 
@@ -311,13 +311,11 @@ func (reader *Reader) readFooter(footerContent blockContent) error {
 func (reader *Reader) readBlock(bh blockHandle) (content blockContent, err error) {
 
 	scratch := utils.PoolGetBytes(int(bh.length) + kBlockTailLen)
-	var result *[]byte
-	_, err = reader.r.Pread(int64(bh.offset), &result, scratch)
-	if err != nil {
+	data, rErr := reader.r.Pread(scratch, int64(bh.offset))
+	if rErr != nil {
 		utils.PoolPutBytes(scratch)
 		return
 	}
-	data := *result
 	blockContentLen := int(bh.length)
 
 	compressType := data[blockContentLen]
@@ -334,7 +332,7 @@ func (reader *Reader) readBlock(bh blockHandle) (content blockContent, err error
 	switch compressionType(compressType) {
 	case kCompressionTypeNone:
 		content.data = data
-		if result != scratch { // don't need double cache
+		if !bytes.Equal(scratch, data) { // don't need double cache
 			utils.PoolPutBytes(scratch)
 		} else {
 			content.cacheable = true
@@ -363,7 +361,8 @@ func (reader *Reader) blockReader(bh blockHandle) (iter iterator.Iterator, err e
 		handle  *cache.LRUHandle
 	)
 	if reader.opt.BlockCache != nil {
-		cacheKey := *utils.PoolGetBytes(16)
+		cacheKey := utils.PoolGetBytes(16)
+		defer utils.PoolPutBytes(cacheKey)
 		binary.LittleEndian.PutUint64(cacheKey[:8], reader.cacheId)
 		binary.LittleEndian.PutUint64(cacheKey[8:], bh.offset)
 
@@ -392,7 +391,7 @@ func (reader *Reader) blockReader(bh blockHandle) (iter iterator.Iterator, err e
 	dataBlock, err := newDataBlock(content, reader.opt.InternalComparer)
 	if err != nil {
 		if content.poolable {
-			utils.PoolPutBytes(&content.data)
+			utils.PoolPutBytes(content.data)
 		}
 		return
 	}
@@ -478,12 +477,12 @@ func (reader *Reader) find(key []byte, noValue bool, filtered bool) (ikey []byte
 func (reader *Reader) Close(args ...interface{}) {
 	if reader.indexBlock != nil {
 		if reader.indexBlock.blockContent.poolable {
-			utils.PoolPutBytes(&reader.indexBlock.blockContent.data)
+			utils.PoolPutBytes(reader.indexBlock.blockContent.data)
 		}
 	}
 	if reader.filterBlockReader != nil {
 		if reader.filterBlockReader.filterData.poolable {
-			utils.PoolPutBytes(&reader.filterBlockReader.filterData.data)
+			utils.PoolPutBytes(reader.filterBlockReader.filterData.data)
 		}
 	}
 
@@ -614,6 +613,6 @@ func releaseContent(args ...interface{}) {
 	content, ok := args[0].(*blockContent)
 	utils.Assert(ok, "releaseContent arg1 convert to *blockContent failed")
 	if content.poolable {
-		utils.PoolPutBytes(&content.data)
+		utils.PoolPutBytes(content.data)
 	}
 }

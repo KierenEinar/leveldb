@@ -33,8 +33,9 @@ type ByteReader interface {
 }
 
 type RandomAccessReader interface {
-	// Pread sets *result to the read data, may be point to scratch[:]
-	Pread(offset int64, result **[]byte, scratch *[]byte) (n int, err error)
+	// Pread return bytes into value, if bytes.Equal(scratch, value) means file reader,
+	// other wise means data from mmap reader
+	Pread(scratch []byte, offset int64) (value []byte, err error)
 	io.Closer
 }
 

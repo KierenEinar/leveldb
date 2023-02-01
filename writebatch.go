@@ -200,7 +200,7 @@ func decodeBatchData(r storage.SequentialReader, wb *WriteBatch) (err error) {
 	}
 	key := utils.PoolGetBytes(int(kLen))
 	defer utils.PoolPutBytes(key)
-	_, err = r.Read(*key)
+	_, err = r.Read(key)
 	if err != nil {
 		return
 	}
@@ -213,13 +213,13 @@ func decodeBatchData(r storage.SequentialReader, wb *WriteBatch) (err error) {
 		}
 		value := utils.PoolGetBytes(int(vLen))
 		defer utils.PoolPutBytes(value)
-		_, err = r.Read(*value)
+		_, err = r.Read(value)
 		if err != nil {
 			return
 		}
-		err = wb.Put(*key, *value)
+		err = wb.Put(key, value)
 	} else if kt == byte(keyTypeDel) {
-		err = wb.Delete(*key)
+		err = wb.Delete(key)
 	}
 	return
 }
@@ -270,7 +270,7 @@ func (wb *WriteBatch) foreach(fn func(kt keyType, key []byte, seq sequence, valu
 			return err
 		}
 
-		key = *utils.PoolGetBytes(int(keyLen))
+		key = utils.PoolGetBytes(int(keyLen))
 		_, err = wb.rep.Read(key)
 		if err != nil {
 			goto END
@@ -281,7 +281,7 @@ func (wb *WriteBatch) foreach(fn func(kt keyType, key []byte, seq sequence, valu
 			if err != nil {
 				goto END
 			}
-			value = *utils.PoolGetBytes(int(valLen))
+			value = utils.PoolGetBytes(int(valLen))
 			err = fn(keyType(kt), key, wb.seq+sequence(i), value)
 			goto END
 		} else {
@@ -291,11 +291,11 @@ func (wb *WriteBatch) foreach(fn func(kt keyType, key []byte, seq sequence, valu
 
 	END:
 		if key != nil {
-			utils.PoolPutBytes(&key)
+			utils.PoolPutBytes(key)
 		}
 
 		if value != nil {
-			utils.PoolPutBytes(&value)
+			utils.PoolPutBytes(value)
 		}
 
 		if err != nil {

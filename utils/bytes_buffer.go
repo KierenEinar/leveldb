@@ -1,11 +1,11 @@
 package utils
 
-func PoolGetBytes(n int) *[]byte {
+func PoolGetBytes(n int) []byte {
 	// todo used sync.Pool
 	bytes := make([]byte, n)
-	return &bytes
+	return bytes
 }
 
-func PoolPutBytes(b *[]byte) {
+func PoolPutBytes(b []byte) {
 
 }
