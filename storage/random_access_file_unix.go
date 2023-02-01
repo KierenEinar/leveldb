@@ -20,9 +20,8 @@ var gOpenMmapFileLimit = -1
 
 type posixMMAPReadableFile struct {
 	limiter *Limiter
-	RandomAccessReader
-	data []byte
-	fs   *FileStorage
+	data    []byte
+	fs      *FileStorage
 }
 
 func (r *posixMMAPReadableFile) Close() error {
@@ -182,27 +181,5 @@ func mmapOpenFile() int {
 }
 
 func (fs *FileStorage) NewRandomAccessReader(fd Fd) (r RandomAccessReader, err error) {
-
-	if err = fs.ref(); err != nil {
-		return
-	}
-
-	filePath := fs.filePath(fd)
-	file, err := os.OpenFile(filePath, os.O_RDONLY, 0644)
-	if err != nil {
-		return
-	}
-
-	st, err := file.Stat()
-	if err != nil {
-		return
-	}
-
-	fd_ := int(file.Fd())
-
-	if !fs.mmapLimiter.Acquire() {
-		return newPosixMMAPReadableFile(fs, fd_, int(st.Size()), fs.mmapLimiter)
-	}
-
-	return newPosixRandomAccessFileReader(fs, fd_, filePath, fs.fdLimiter)
+	return fs.newRandomAccessFile(fd)
 }

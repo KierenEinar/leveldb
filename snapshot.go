@@ -2,6 +2,7 @@ package leveldb
 
 import (
 	"container/list"
+	"runtime"
 	"sync"
 
 	"github.com/KierenEinar/leveldb/errors"
@@ -44,12 +45,13 @@ func (dbImpl *DBImpl) releaseSnapshot(se *snapshotElement) {
 }
 
 type Snapshot struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	db       *DBImpl
 	ele      *snapshotElement
 	released bool
 }
 
+// GetSnapshot caller should call Release after done
 func (dbImpl *DBImpl) GetSnapshot() (*Snapshot, error) {
 	if dbImpl.ok() {
 		return dbImpl.newSnapshot(), nil
@@ -57,10 +59,34 @@ func (dbImpl *DBImpl) GetSnapshot() (*Snapshot, error) {
 	return nil, errors.ErrClosed
 }
 
+func (snapshot *Snapshot) Release() {
+	snapshot.mu.Lock()
+	defer snapshot.mu.Unlock()
+
+	if !snapshot.released {
+		snapshot.released = true
+		snapshot.db.releaseSnapshot(snapshot.ele)
+		snapshot.db = nil
+		snapshot.ele = nil
+		runtime.SetFinalizer(snapshot, nil)
+	}
+}
+
 func (dbImpl *DBImpl) newSnapshot() *Snapshot {
 	ele := dbImpl.acquireSnapshot()
-	return &Snapshot{
+	s := &Snapshot{
 		db:  dbImpl,
 		ele: ele,
 	}
+	runtime.SetFinalizer(s, (*Snapshot).Release)
+	return s
+}
+
+func (snapshot *Snapshot) Get(key []byte) ([]byte, error) {
+	snapshot.mu.RLock()
+	defer snapshot.mu.RUnlock()
+	if snapshot.released {
+		return nil, errors.ErrReleased
+	}
+	return snapshot.db.get(snapshot.ele.seq, key)
 }
