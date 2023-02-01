@@ -156,7 +156,7 @@ func (dbImpl *DBImpl) get(seq sequence, key []byte) ([]byte, error) {
 	var (
 		mErr       error
 		value      []byte
-		havaUpdate bool
+		haveUpdate bool
 		gStat      *GetStat
 	)
 
@@ -165,14 +165,14 @@ func (dbImpl *DBImpl) get(seq sequence, key []byte) ([]byte, error) {
 	} else if imm != nil && memGet(imm, ikey, &value, &mErr) {
 		// done
 	} else {
-		havaUpdate = true
+		haveUpdate = true
 		gStat, mErr = v.get(ikey, &value)
 	}
 
 	dbImpl.rwMutex.Lock()
 	defer dbImpl.rwMutex.Unlock()
 
-	if havaUpdate && v.updateStat(gStat) {
+	if haveUpdate && v.updateStat(gStat) {
 		dbImpl.maybeScheduleCompaction()
 	}
 
