@@ -4,7 +4,7 @@
 package storage
 
 import (
-	"errors"
+	"io"
 	"math"
 	"os"
 	"runtime"
@@ -52,11 +52,14 @@ func newPosixMMAPReadableFile(fs *FileStorage, fd int, fileSize int, limiter *Li
 }
 
 func (mmap *posixMMAPReadableFile) Pread(scratch []byte, offset int64) (value []byte, err error) {
-	if int(offset) > len(mmap.data) {
-		err = errors.New("error mmap off position read out of bounds")
+	if int(offset) >= len(mmap.data) {
+		err = io.EOF
 		return
 	}
 	length := len(scratch)
+	if int(offset)+length > len(mmap.data) {
+		length = len(mmap.data) - int(offset)
+	}
 	data := mmap.data[offset : offset+int64(length)]
 	value = data
 	return

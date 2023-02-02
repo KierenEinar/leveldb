@@ -221,7 +221,7 @@ func (l *Limiter) Acquire() bool {
 
 func (l *Limiter) Release() {
 	s := atomic.AddInt32(&l.allowsAcquired, 1)
-	utils.Assert(s < l.allowsAcquired)
+	utils.Assert(s > 0)
 }
 
 const kWritableBufferSize = 1 << 16
