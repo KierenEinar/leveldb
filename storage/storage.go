@@ -130,10 +130,10 @@ func (fs *FileStorage) Close() error {
 
 func (fs *FileStorage) SetCurrent(num uint64) (err error) {
 
-	descriptorFile := path.Join(fs.dbPath, Fd{KDescriptorFile, num}.String())
+	descriptorFile := Fd{KDescriptorFile, num}.String()
 	dbTmpFile := path.Join(fs.dbPath, Fd{KDBTempFile, num}.String())
 	content := descriptorFile + "\n"
-
+	current := path.Join(fs.dbPath, "CURRENT")
 	tmp, err := os.OpenFile(dbTmpFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (fs *FileStorage) SetCurrent(num uint64) (err error) {
 		return err
 	}
 
-	err = os.Rename(dbTmpFile, descriptorFile)
+	err = os.Rename(dbTmpFile, current)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func (fs *FileStorage) GetCurrent() (fd Fd, err error) {
 		return
 	}
 
-	currentFd, parseErr := ParseFd(string(content))
+	currentFd, parseErr := ParseFd(string(bytes.TrimRight(content, "\n")))
 	if parseErr != nil {
 		err = parseErr
 		return

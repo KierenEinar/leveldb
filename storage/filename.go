@@ -57,7 +57,7 @@ func ParseFd(fileName string) (fd Fd, err error) {
 	} else if fileName == "LOCK" {
 		fd.FileType = KDBLockFile
 	} else if strings.HasPrefix(fileName, "MANIFEST") {
-		if _, sErr := fmt.Sscanf("MANIFEST-%06d", fileName, &fd.Num); sErr != nil {
+		if _, sErr := fmt.Sscanf(fileName, "MANIFEST-%06d", &fd.Num); sErr != nil {
 			err = sErr
 			return
 		}

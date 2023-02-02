@@ -11,7 +11,7 @@ func TestFileStorage_WriteAndRead(t *testing.T) {
 
 	tmp := os.TempDir()
 	t.Logf("tmpdir=%s", tmp)
-	stor, err := OpenPath(tmp)
+	fs, err := OpenPath(tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestFileStorage_WriteAndRead(t *testing.T) {
 		Num:      1,
 	}
 
-	writer, err := stor.NewWritableFile(fd)
+	writer, err := fs.NewWritableFile(fd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestFileStorage_WriteAndRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader, err := stor.NewRandomAccessReader(fd)
+	reader, err := fs.NewRandomAccessReader(fd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,8 +63,57 @@ func TestFileStorage_WriteAndRead(t *testing.T) {
 		t.Fatalf("read not eq write, count=%d, expected=%d", count, 65535*1024)
 	}
 
-	err = stor.Remove(fd)
+	err = fs.Remove(fd)
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestFileStorage_LockFile_UnLockFile(t *testing.T) {
+
+	tmp := os.TempDir()
+	t.Logf("tmpdir=%s", tmp)
+	fs, err := OpenPath(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fd := FileLockFd()
+
+	fLock, err := fs.LockFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = fs.UnLockFile(fLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = fs.Close()
+
+}
+
+func TestFileStorage_SetCurrent_GetCurrent(t *testing.T) {
+	tmp := os.TempDir()
+	t.Logf("tmpdir=%s", tmp)
+	fs, err := OpenPath(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = fs.SetCurrent(10)
+	fd, err := fs.GetCurrent()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fd.Num != 10 {
+		t.Fatalf("fd num not eq 10")
+	}
+
+	if fd.FileType != KDescriptorFile {
+		t.Fatalf("fd filetype not eq KDescriptorFile")
+	}
+
 }
