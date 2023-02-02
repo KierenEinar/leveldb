@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KierenEinar/leveldb/utils"
+
 	"github.com/KierenEinar/leveldb/comparer"
 )
 
@@ -76,31 +78,11 @@ func Test_dataBlock(t *testing.T) {
 func randInputs(maxLen int) []kv {
 	inputs := make([]kv, rnd.Int()%maxLen+1)
 	for i := 0; i < len(inputs); i++ {
-		key := string(randString(16))
-		value := string(randString(100))
+		key := string(utils.RandRunes(16))
+		value := string(utils.RandRunes(100))
 		inputs[i].key = []byte(key)
 		inputs[i].value = []byte(value)
 	}
 	return inputs
 
-}
-
-func randString(maxLen int) []rune {
-
-	minAsciiUpper := uint8('A')
-	minAsciiLower := uint8('a')
-	characters := make([]rune, 0, 42)
-	for i := uint8(0); i < 26; i++ {
-		characters = append(characters, rune(minAsciiUpper+i))
-	}
-	for i := uint8(0); i < 26; i++ {
-		characters = append(characters, rune(minAsciiLower+i))
-	}
-	randLen := rnd.Int()%maxLen + 1
-	r := make([]rune, 0, randLen)
-	for i := 0; i < randLen; i++ {
-		randPos := rnd.Int() % len(characters)
-		r = append(r, characters[randPos])
-	}
-	return r
 }
