@@ -835,16 +835,17 @@ func (vSet *VersionSet) release(mu *sync.RWMutex) error {
 	mu.Unlock()
 	vSet.tableCache.Close()
 	vSet.blockCache.Close()
-	mu.Lock()
-
-	version := newVersion(vSet)
-	version.closed = true
-	vSet.appendVersion(version)
 
 	if vSet.manifestWriter != nil {
 		_ = vSet.manifestWriter.Close()
 		vSet.manifestWriter = nil
 	}
+
+	mu.Lock()
+
+	version := newVersion(vSet)
+	version.closed = true
+	vSet.appendVersion(version)
 
 	return nil
 }
