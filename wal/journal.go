@@ -35,7 +35,7 @@ each block is 32kb, block header is
 
 const kJournalBlockSize = 1 << 15
 const kWritableBufferSize = 1 << 16
-const journalBlockHeaderLen = 7
+const kJournalBlockHeaderLen = 7
 
 const (
 	kRecordFull    = byte(1)
@@ -114,11 +114,12 @@ func (jw *JournalWriter) Write(chunk []byte) (n int, err error) {
 			break
 		}
 
-		blockRemain = kJournalBlockSize - (jw.blockOffset + journalBlockHeaderLen)
+		bufRemain := kJournalBlockSize - jw.blockOffset%kJournalBlockSize
+		blockRemain = bufRemain - kJournalBlockHeaderLen
 
-		if blockRemain < journalBlockHeaderLen {
-			_, _ = jw.w.Write(make([]byte, blockRemain))
-			jw.blockOffset = 0
+		if bufRemain <= kJournalBlockHeaderLen {
+			_, _ = jw.w.Write(make([]byte, bufRemain))
+			jw.blockOffset += bufRemain
 			continue
 		}
 
@@ -162,12 +163,12 @@ func (jw *JournalWriter) Write(chunk []byte) (n int, err error) {
 
 func (jw *JournalWriter) writePhysicalRecord(data []byte, chunkType byte) error {
 	avail := len(data)
-	record := make([]byte, journalBlockHeaderLen)
+	record := make([]byte, kJournalBlockHeaderLen)
 	checkSum := crc32.ChecksumIEEE(data)
 	binary.LittleEndian.PutUint32(record, checkSum)
 	binary.LittleEndian.PutUint16(record[4:], uint16(avail))
 	record[6] = chunkType
-	jw.blockOffset += journalBlockHeaderLen
+	jw.blockOffset += kJournalBlockHeaderLen
 	_, err := jw.w.Write(record)
 	if err != nil {
 		return err
@@ -190,7 +191,7 @@ func (jw *JournalWriter) Sync() error {
 }
 
 func (jw *JournalWriter) FileSize() int64 {
-	return 0
+	return int64(jw.blockOffset)
 }
 
 // JournalReader journal reader
@@ -365,7 +366,7 @@ type sequentialFile struct {
 func (s *sequentialFile) readPhysicalRecord() (kRecordType byte, fragment []byte) {
 
 	for {
-		if s.physicalReadOffset+journalBlockHeaderLen > s.physicalN {
+		if s.physicalReadOffset+kJournalBlockHeaderLen > s.physicalN {
 			if !s.eof {
 				n, err := s.Read(s.buf[:])
 				s.physicalN = n
@@ -395,7 +396,7 @@ func (s *sequentialFile) readPhysicalRecord() (kRecordType byte, fragment []byte
 			return
 		}
 
-		actualSum := crc32.ChecksumIEEE(s.buf[s.physicalReadOffset+journalBlockHeaderLen : s.physicalReadOffset+journalBlockHeaderLen+dataLen])
+		actualSum := crc32.ChecksumIEEE(s.buf[s.physicalReadOffset+kJournalBlockHeaderLen : s.physicalReadOffset+kJournalBlockHeaderLen+dataLen])
 		if expectedSum != actualSum {
 			kRecordType = kBadRecord
 			s.physicalReadOffset = s.physicalN // drop whole record
