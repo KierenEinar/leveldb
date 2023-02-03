@@ -223,7 +223,7 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 	if dbImpl.snapshots.Len() == 0 {
 		c.minSeq = dbImpl.seqNum
 	} else {
-		c.minSeq = dbImpl.snapshots.Front().Value.(sequence)
+		c.minSeq = dbImpl.snapshots.Front().Value.(*snapshotElement).seq
 	}
 
 	dbImpl.rwMutex.Unlock()
