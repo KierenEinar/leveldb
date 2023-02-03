@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"io"
+	"io/ioutil"
 	"os"
 	"testing"
 )
@@ -77,7 +78,7 @@ func TestFileStorage_LockFile_UnLockFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer fs.Close()
 	fd := FileLockFd()
 
 	fLock, err := fs.LockFile(fd)
@@ -90,8 +91,6 @@ func TestFileStorage_LockFile_UnLockFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = fs.Close()
-
 }
 
 func TestFileStorage_SetCurrent_GetCurrent(t *testing.T) {
@@ -101,7 +100,7 @@ func TestFileStorage_SetCurrent_GetCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer fs.Close()
 	err = fs.SetCurrent(10)
 	fd, err := fs.GetCurrent()
 	if err != nil {
@@ -115,5 +114,63 @@ func TestFileStorage_SetCurrent_GetCurrent(t *testing.T) {
 	if fd.FileType != KDescriptorFile {
 		t.Fatalf("fd filetype not eq KDescriptorFile")
 	}
+
+}
+
+func TestFileStorage_List(t *testing.T) {
+
+	tmp, err := ioutil.TempDir(os.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("tmpdir=%s", tmp)
+	defer os.Remove(tmp)
+
+	fs, err := OpenPath(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+
+	fds := []Fd{
+		{
+			FileType: KDescriptorFile,
+			Num:      1,
+		},
+		{
+			FileType: KJournalFile,
+			Num:      2,
+		},
+		{
+			FileType: KDBTempFile,
+			Num:      3,
+		},
+	}
+
+	fds = append(fds, FileLockFd())
+	fds = append(fds, CurrentFd())
+
+	pendings := make(map[string]struct{})
+
+	for _, fd := range fds {
+		w, _ := fs.NewWritableFile(fd)
+		_ = w.Close()
+		pendings[fd.String()] = struct{}{}
+	}
+
+	getFds, err := fs.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, fd := range getFds {
+		delete(pendings, fd.String())
+	}
+
+	if len(pendings) > 0 {
+		t.Fatalf("list failed, pending=%v", pendings)
+	}
+
+	fs.RemoveDir()
 
 }

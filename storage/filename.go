@@ -66,7 +66,7 @@ func ParseFd(fileName string) (fd Fd, err error) {
 
 		var ft string
 
-		_, sErr := fmt.Sscanf("%06d.%s", fileName, &fd.Num, &ft)
+		_, sErr := fmt.Sscanf(fileName, "%06d.%s", &fd.Num, &ft)
 		if sErr != nil {
 			err = sErr
 			return
@@ -89,5 +89,11 @@ func ParseFd(fileName string) (fd Fd, err error) {
 func FileLockFd() Fd {
 	return Fd{
 		FileType: KDBLockFile,
+	}
+}
+
+func CurrentFd() Fd {
+	return Fd{
+		FileType: KCurrentFile,
 	}
 }

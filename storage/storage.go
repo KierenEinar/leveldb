@@ -80,7 +80,7 @@ type Storage interface {
 
 	List() ([]Fd, error)
 
-	RemoveDir(dir string) error
+	RemoveDir() error
 
 	FileSize(fd Fd) (int64, error)
 
@@ -461,8 +461,8 @@ func (fs *FileStorage) List() (fds []Fd, err error) {
 	return
 }
 
-func (fs *FileStorage) RemoveDir(dir string) (err error) {
-	filePath := path.Join(fs.dbPath, dir)
+func (fs *FileStorage) RemoveDir() (err error) {
+	filePath := path.Join(fs.dbPath)
 	fInfo, err := os.Stat(filePath)
 	if err != nil {
 		return

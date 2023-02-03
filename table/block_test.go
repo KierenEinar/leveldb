@@ -78,8 +78,8 @@ func Test_dataBlock(t *testing.T) {
 func randInputs(maxLen int) []kv {
 	inputs := make([]kv, rnd.Int()%maxLen+1)
 	for i := 0; i < len(inputs); i++ {
-		key := string(utils.RandRunes(16))
-		value := string(utils.RandRunes(100))
+		key := utils.RandString(16)
+		value := utils.RandString(100)
 		inputs[i].key = []byte(key)
 		inputs[i].value = []byte(value)
 	}
