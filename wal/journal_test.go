@@ -21,6 +21,7 @@ func TestMain(m *testing.M) {
 func Test_BasicWrite_Read(t *testing.T) {
 
 	tmpDir, _ := ioutil.TempDir(os.TempDir(), "")
+	t.Logf("tmpdir=%s", tmpDir)
 	fs, err := storage.OpenPath(tmpDir)
 	if err != nil {
 		t.Fatal(err)
@@ -29,26 +30,20 @@ func Test_BasicWrite_Read(t *testing.T) {
 	defer fs.Close()
 	defer os.RemoveAll(tmpDir)
 
-	fd := storage.Fd{
-		FileType: storage.KJournalFile,
-		Num:      1,
-	}
-
-	writer, err := fs.NewWritableFile(fd)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	jw := NewJournalWriter(writer)
-	defer jw.Close()
-
 	t.Run("write full block", func(t *testing.T) {
 
-		reader, err := fs.NewRandomAccessReader(fd)
+		fd := storage.Fd{
+			FileType: storage.KJournalFile,
+			Num:      1,
+		}
+
+		writer, err := fs.NewWritableFile(fd)
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer reader.Close()
+
+		jw := NewJournalWriter(writer)
+		defer jw.Close()
 
 		chunk := bytes.Repeat([]byte{'x'}, kJournalBlockSize-7)
 		_, err = jw.Write(chunk)
@@ -56,12 +51,31 @@ func Test_BasicWrite_Read(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		reader, err := fs.NewRandomAccessReader(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reader.Close()
+
 		if err := verifyChunk(chunk, reader, 0, kRecordFull); err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	t.Run("write across block", func(t *testing.T) {
+
+		fd := storage.Fd{
+			FileType: storage.KJournalFile,
+			Num:      2,
+		}
+
+		writer, err := fs.NewWritableFile(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		jw := NewJournalWriter(writer)
+		defer jw.Close()
 
 		chunk1 := bytes.Repeat([]byte{'x'}, kJournalBlockSize-14)
 		_, err = jw.Write(chunk1)

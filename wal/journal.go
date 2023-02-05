@@ -244,10 +244,7 @@ func (jr *JournalReader) NextChunk() (storage.SequentialReader, error) {
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		if err == errors.ErrJournalSkipped {
-			continue
-		}
-		if err == errors.ErrMissingChunk {
+		if err == errors.ErrJournalSkipped || err == errors.ErrMissingChunk {
 			jr.scratch.Reset()
 			continue
 		}
@@ -302,21 +299,30 @@ func (chunk *chunkReader) Read(p []byte) (nRead int, rErr error) {
 		}
 
 		if chunk.eof {
-			rErr = io.EOF
+			if nRead == 0 {
+				rErr = io.EOF
+			}
 			return
 		}
 
 		// p is not fill full, only if there has next chunk should read next chunk
 		_, fragment, err := jr.seekNextFragment(false)
-		jr.scratch.Write(fragment)
 		if err == io.EOF {
 			chunk.eof = true
+			err = nil
 		}
-		if err != nil {
+		if err == errors.ErrMissingChunk || err == errors.ErrJournalSkipped {
 			jr.scratch.Reset()
+			rErr = io.ErrUnexpectedEOF
+			return
+		}
+
+		if err != nil {
 			rErr = err
 			return
 		}
+
+		jr.scratch.Write(fragment)
 
 	}
 }
@@ -328,31 +334,22 @@ func (chunk *chunkReader) Close() error {
 func (jr *JournalReader) seekNextFragment(first bool) (kRecordType byte, fragment []byte, err error) {
 
 	kRecordType, fragment = jr.src.readPhysicalRecord()
-	if kRecordType == kEof {
-		err = io.EOF
-		return
-	}
-
-	if kRecordType == kBadRecord {
-		err = errors.ErrJournalSkipped
-		return
-	}
 
 	switch kRecordType {
+	case kEof:
+		err = io.EOF
+	case kBadRecord:
+		err = errors.ErrJournalSkipped
 	case kRecordFirst, kRecordFull:
 		if !first {
 			err = errors.ErrMissingChunk
 		}
-		return
 	case kRecordMiddle, kRecordLast:
 		if first {
 			err = errors.ErrMissingChunk
 		}
-		return
-	default:
-		err = errors.ErrJournalSkipped
-		return
 	}
+	return
 }
 
 type sequentialFile struct {
@@ -366,7 +363,7 @@ type sequentialFile struct {
 func (s *sequentialFile) readPhysicalRecord() (kRecordType byte, fragment []byte) {
 
 	for {
-		if s.physicalReadOffset+kJournalBlockHeaderLen > s.physicalN {
+		if s.physicalReadOffset+kJournalBlockHeaderLen >= s.physicalN {
 			if !s.eof {
 				n, err := s.Read(s.buf[:])
 				s.physicalN = n
@@ -403,14 +400,8 @@ func (s *sequentialFile) readPhysicalRecord() (kRecordType byte, fragment []byte
 			return
 		}
 
-		// last empty block
-		if dataLen == 0 {
-			s.physicalReadOffset += dataLen
-			continue
-		}
-
 		fragment = s.buf[s.physicalReadOffset : s.physicalReadOffset+dataLen]
-		s.physicalReadOffset += dataLen
+		s.physicalReadOffset += dataLen + kJournalBlockHeaderLen
 
 		return
 

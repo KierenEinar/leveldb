@@ -694,6 +694,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 		_ = reader.Close()
 	}()
 	for {
+	Restart:
 		chunkReader, err := journalReader.NextChunk()
 		if err == io.EOF {
 			break
@@ -704,8 +705,8 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 			if err == io.EOF {
 				break
 			}
-			if err != nil {
-				return err
+			if err == io.ErrUnexpectedEOF {
+				goto Restart
 			}
 			if memDB.ApproximateSize() > int(dbImpl.opt.WriteBufferSize) {
 				err = dbImpl.writeLevel0Table(memDB, edit)
