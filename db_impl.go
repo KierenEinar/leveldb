@@ -685,7 +685,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 	if err != nil {
 		return err
 	}
-	journalReader := wal.NewJournalReader(reader)
+	journalReader := wal.NewJournalReader(reader, dbImpl.opt.DropWholeBlockOnParseChunkErr)
 	memDB := dbImpl.mPoolGet(0)
 	memDB.Ref()
 	defer func() {
@@ -706,11 +706,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 		}
 
 		writeBatch, err := decodeBatchChunk(chunkReader, dbImpl.versionSet.stSeqNum)
-		if err == io.EOF {
-			continue
-		}
-		if err == errors.ErrChunkSkipped {
-			// todo option warming or db crashed
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			continue
 		}
 
@@ -865,6 +861,11 @@ func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, e
 	if o == nil || o.MaxOpenFiles == 0 {
 		opt.MaxOpenFiles = 1000 // 1000
 	}
+
+	if o == nil || o.DropWholeBlockOnParseChunkErr {
+		opt.DropWholeBlockOnParseChunkErr = true
+	}
+
 	return
 }
 

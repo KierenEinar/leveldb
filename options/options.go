@@ -80,4 +80,8 @@ type Options struct {
 
 	// max compaction limit factor, set default 25
 	MaxCompactionLimitFactor uint32
+
+	// when part of journal chunk parse err, drop whole block. set default true, when set false,
+	// it will return error when recover log file or recover manifest.
+	DropWholeBlockOnParseChunkErr bool
 }

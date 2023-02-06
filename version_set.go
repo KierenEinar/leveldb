@@ -543,15 +543,12 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	)
 
 	vBuilder := newBuilder(vSet, newVersion(vSet))
-	journalReader := wal.NewJournalReader(reader)
+	journalReader := wal.NewJournalReader(reader, vSet.opt.DropWholeBlockOnParseChunkErr)
 	for {
 
 		chunkReader, cErr := journalReader.NextChunk()
 		if cErr == io.EOF {
 			break
-		}
-		if cErr == errors.ErrChunkSkipped {
-			continue
 		}
 
 		if cErr != nil {
@@ -560,6 +557,10 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 		}
 
 		edit.DecodeFrom(chunkReader)
+
+		if edit.err == io.EOF {
+			return
+		}
 
 		if edit.err != nil {
 			err = edit.err

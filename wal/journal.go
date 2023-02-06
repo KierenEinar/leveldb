@@ -218,16 +218,18 @@ func (jw *JournalWriter) FileSize() int64 {
 //		process chunk
 //	}
 type JournalReader struct {
-	src     *sequentialFile
-	scratch bytes.Buffer // for reused read
+	src                           *sequentialFile
+	scratch                       bytes.Buffer // for reused read
+	dropWholeBlockOnParseChunkErr bool
 }
 
-func NewJournalReader(reader storage.SequentialReader) *JournalReader {
+func NewJournalReader(reader storage.SequentialReader, dropWholeBlockOnParseChunkErr bool) *JournalReader {
 	return &JournalReader{
 		src: &sequentialFile{
 			SequentialReader: reader,
 		},
-		scratch: *bytes.NewBuffer(nil),
+		scratch:                       *bytes.NewBuffer(nil),
+		dropWholeBlockOnParseChunkErr: dropWholeBlockOnParseChunkErr,
 	}
 }
 
@@ -244,7 +246,7 @@ func (jr *JournalReader) NextChunk() (storage.SequentialReader, error) {
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		if err == errors.ErrChunkSkipped {
+		if err == errors.ErrChunkSkipped && jr.dropWholeBlockOnParseChunkErr {
 			jr.scratch.Reset()
 			continue
 		}
@@ -264,24 +266,20 @@ func (jr *JournalReader) Close() error {
 	return nil
 }
 
-func (chunk *chunkReader) ReadByte() (byte, error) {
+func (chunk *chunkReader) ReadByte() (b byte, err error) {
 
 	jr := chunk.jr
-
-	for {
-
-		b, err := jr.scratch.ReadByte()
-		if err != nil && err != io.EOF {
-			return b, err
+	b, err = jr.scratch.ReadByte()
+	if err == io.EOF && !chunk.eof {
+		p := make([]byte, 1)
+		_, err = chunk.Read(p)
+		if err != nil {
+			return
 		}
-
-		_, fragment, err := jr.seekNextFragment(false)
-		jr.scratch.Write(fragment)
-		if err == io.EOF {
-			chunk.eof = true
-		}
+		b = p[0]
 	}
 
+	return
 }
 
 func (chunk *chunkReader) Read(p []byte) (nRead int, rErr error) {
@@ -307,14 +305,14 @@ func (chunk *chunkReader) Read(p []byte) (nRead int, rErr error) {
 
 		// p is not fill full, only if there has next chunk should read next chunk
 		_, fragment, err := jr.seekNextFragment(false)
+
 		if err == io.EOF {
 			chunk.eof = true
-			err = nil
 		}
-		if err == errors.ErrMissingChunk || err == errors.ErrChunkSkipped {
-			jr.scratch.Reset()
-			err = errors.ErrChunkSkipped
-			return
+
+		if err == errors.ErrChunkSkipped && jr.dropWholeBlockOnParseChunkErr {
+			chunk.eof = true
+			err = io.ErrUnexpectedEOF
 		}
 
 		if err != nil {

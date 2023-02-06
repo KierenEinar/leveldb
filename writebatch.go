@@ -191,40 +191,39 @@ func decodeBatchChunk(reader storage.SequentialReader, seqNum sequence) (wb Writ
 	return
 }
 
-func decodeBatchData(r storage.SequentialReader, wb *WriteBatch) (err error) {
+func decodeBatchData(r storage.SequentialReader, wb *WriteBatch) error {
 
 	kt, err := r.ReadByte()
 	if err != nil {
-		return
+		return err
 	}
 	kLen, err := binary.ReadUvarint(r)
 	if err != nil {
-		return
+		return err
 	}
 	key := utils.PoolGetBytes(int(kLen))
 	defer utils.PoolPutBytes(key)
 	_, err = r.Read(key)
 	if err != nil {
-		return
+		return err
 	}
 
 	if kt == byte(keyTypeValue) {
-		vLen, rErr := binary.ReadUvarint(r)
-		if rErr != nil {
-			err = rErr
-			return
+		vLen, err := binary.ReadUvarint(r)
+		if err != nil {
+			return err
 		}
 		value := utils.PoolGetBytes(int(vLen))
 		defer utils.PoolPutBytes(value)
 		_, err = r.Read(value)
 		if err != nil {
-			return
+			return err
 		}
 		err = wb.Put(key, value)
 	} else if kt == byte(keyTypeDel) {
 		err = wb.Delete(key)
 	}
-	return
+	return err
 }
 
 func (wb *WriteBatch) insertInto(memDb *MemDB) error {

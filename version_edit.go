@@ -169,10 +169,7 @@ func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
 	for {
 
 		typ = edit.readHeader(src)
-		if edit.err == io.EOF {
-			edit.err = nil
-			return
-		}
+
 		if edit.err != nil {
 			return
 		}
