@@ -16,9 +16,6 @@ const KManifestSizeThreshold = 1 << 26 // 64m
 const KMemTableWriteBufferSize = 1 << 22
 
 const KLevel1SizeThreshold = 10 * (1 << 20) //10m
-const KWriteBatchSeqSize = 8
-const KWriteBatchCountSize = 4
-const KWriteBatchHeaderSize = 12 // first 8 bytes represent sequence, last 4 bytes represent batch count
 const KTypeValue = 1
 const KTypeDel = 2
 const KTypeSeek = KTypeValue

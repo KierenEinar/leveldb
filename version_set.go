@@ -550,7 +550,7 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 		if cErr == io.EOF {
 			break
 		}
-		if cErr == io.ErrUnexpectedEOF {
+		if cErr == errors.ErrChunkSkipped {
 			continue
 		}
 

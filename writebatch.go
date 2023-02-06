@@ -7,16 +7,19 @@ import (
 
 	"github.com/KierenEinar/leveldb/collections"
 	"github.com/KierenEinar/leveldb/errors"
-	"github.com/KierenEinar/leveldb/options"
 	"github.com/KierenEinar/leveldb/storage"
 	"github.com/KierenEinar/leveldb/utils"
 )
+
+const KWriteBatchSeqSize = 8
+const KWriteBatchCountSize = 4
+const KWriteBatchHeaderSize = 12 // first 8 bytes represent sequence, last 4 bytes represent batch count
 
 type WriteBatch struct {
 	seq     sequence
 	count   uint32
 	scratch [binary.MaxVarintLen64]byte
-	header  [options.KWriteBatchHeaderSize]byte
+	header  [KWriteBatchHeaderSize]byte
 	rep     *collections.LinkBlockBuffer
 }
 
@@ -81,13 +84,13 @@ func (wb *WriteBatch) Delete(key []byte) (err error) {
 
 func (wb *WriteBatch) SetSequence(seq sequence) {
 	wb.seq = seq
-	binary.LittleEndian.PutUint64(wb.header[:options.KWriteBatchSeqSize], uint64(seq))
-	wb.rep.Update(0, wb.header[:options.KWriteBatchSeqSize])
+	binary.LittleEndian.PutUint64(wb.header[:KWriteBatchSeqSize], uint64(seq))
+	wb.rep.Update(0, wb.header[:KWriteBatchSeqSize])
 }
 
 func (wb *WriteBatch) setCount(count uint32) {
-	binary.LittleEndian.PutUint32(wb.header[options.KWriteBatchSeqSize:], count)
-	wb.rep.Update(options.KWriteBatchSeqSize, wb.header[options.KWriteBatchSeqSize:])
+	binary.LittleEndian.PutUint32(wb.header[KWriteBatchSeqSize:], count)
+	wb.rep.Update(KWriteBatchSeqSize, wb.header[KWriteBatchSeqSize:])
 }
 
 func (wb *WriteBatch) Reset() {
@@ -126,7 +129,7 @@ func (wb *WriteBatch) append(src *WriteBatch) error {
 		}
 
 		if firstRead {
-			_, err := src.rep.Write(tmp[options.KWriteBatchHeaderSize:n])
+			_, err := src.rep.Write(tmp[KWriteBatchHeaderSize:n])
 			if err != nil {
 				return err
 			}
@@ -168,13 +171,13 @@ func decodeBatchChunk(reader storage.SequentialReader, seqNum sequence) (wb Writ
 	if err != nil {
 		return
 	}
-	if n < options.KWriteBatchHeaderSize {
+	if n < KWriteBatchHeaderSize {
 		err = errors.NewErrCorruption("leveldb/chunk batch group header less than header approximateSize")
 		return
 	}
 
-	seq := sequence(binary.LittleEndian.Uint64(wb.header[:options.KWriteBatchSeqSize]))
-	batchCount := binary.LittleEndian.Uint32(wb.header[options.KWriteBatchSeqSize:options.KWriteBatchHeaderSize])
+	seq := sequence(binary.LittleEndian.Uint64(wb.header[:KWriteBatchSeqSize]))
+	batchCount := binary.LittleEndian.Uint32(wb.header[KWriteBatchSeqSize:KWriteBatchHeaderSize])
 	utils.Assert(seq >= seqNum)
 	utils.Assert(seq+sequence(batchCount) > seqNum)
 	wb.SetSequence(seq)
@@ -239,16 +242,16 @@ func (wb *WriteBatch) insertInto(memDb *MemDB) error {
 func (wb *WriteBatch) foreach(fn func(kt keyType, key []byte, seq sequence, value []byte) error) error {
 
 	wb.rep.ResetRead(0)
-	seqN, err := wb.rep.Read(wb.header[:options.KWriteBatchSeqSize])
+	seqN, err := wb.rep.Read(wb.header[:KWriteBatchSeqSize])
 	if err != nil {
 		return err
 	}
-	utils.Assert(seqN == options.KWriteBatchSeqSize)
-	seq := binary.LittleEndian.Uint64(wb.header[:options.KWriteBatchSeqSize])
+	utils.Assert(seqN == KWriteBatchSeqSize)
+	seq := binary.LittleEndian.Uint64(wb.header[:KWriteBatchSeqSize])
 
-	countN, err := wb.rep.Read(wb.header[options.KWriteBatchSeqSize:options.KWriteBatchHeaderSize])
-	utils.Assert(countN == options.KWriteBatchCountSize)
-	count := binary.LittleEndian.Uint32(wb.header[options.KWriteBatchHeaderSize:options.KWriteBatchHeaderSize])
+	countN, err := wb.rep.Read(wb.header[KWriteBatchSeqSize:KWriteBatchHeaderSize])
+	utils.Assert(countN == KWriteBatchCountSize)
+	count := binary.LittleEndian.Uint32(wb.header[KWriteBatchHeaderSize:KWriteBatchHeaderSize])
 
 	utils.Assert(sequence(seq) == wb.seq)
 	utils.Assert(count == wb.count)

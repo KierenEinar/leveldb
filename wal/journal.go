@@ -244,7 +244,7 @@ func (jr *JournalReader) NextChunk() (storage.SequentialReader, error) {
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		if err == errors.ErrJournalSkipped || err == errors.ErrMissingChunk {
+		if err == errors.ErrChunkSkipped {
 			jr.scratch.Reset()
 			continue
 		}
@@ -311,9 +311,9 @@ func (chunk *chunkReader) Read(p []byte) (nRead int, rErr error) {
 			chunk.eof = true
 			err = nil
 		}
-		if err == errors.ErrMissingChunk || err == errors.ErrJournalSkipped {
+		if err == errors.ErrMissingChunk || err == errors.ErrChunkSkipped {
 			jr.scratch.Reset()
-			rErr = io.ErrUnexpectedEOF
+			err = errors.ErrChunkSkipped
 			return
 		}
 
@@ -339,14 +339,14 @@ func (jr *JournalReader) seekNextFragment(first bool) (kRecordType byte, fragmen
 	case kEof:
 		err = io.EOF
 	case kBadRecord:
-		err = errors.ErrJournalSkipped
+		err = errors.ErrChunkSkipped
 	case kRecordFirst, kRecordFull:
 		if !first {
-			err = errors.ErrMissingChunk
+			err = errors.ErrChunkSkipped
 		}
 	case kRecordMiddle, kRecordLast:
 		if first {
-			err = errors.ErrMissingChunk
+			err = errors.ErrChunkSkipped
 		}
 	}
 	return

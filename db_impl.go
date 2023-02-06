@@ -694,38 +694,47 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 		_ = reader.Close()
 	}()
 	for {
-	Restart:
+
 		chunkReader, err := journalReader.NextChunk()
 		if err == io.EOF {
 			break
 		}
 
-		for {
-			writeBatch, err := decodeBatchChunk(chunkReader, dbImpl.versionSet.stSeqNum)
-			if err == io.EOF {
-				break
-			}
-			if err == io.ErrUnexpectedEOF {
-				goto Restart
-			}
-			if memDB.ApproximateSize() > int(dbImpl.opt.WriteBufferSize) {
-				err = dbImpl.writeLevel0Table(memDB, edit)
-				if err != nil {
-					return err
-				}
-				memDB.UnRef()
-				memDB = dbImpl.mPoolGet(0)
-				memDB.Ref()
-			}
+		if err != nil {
+			// todo option to return or just warming log
+			return err
+		}
 
-			err = writeBatch.insertInto(memDB)
+		writeBatch, err := decodeBatchChunk(chunkReader, dbImpl.versionSet.stSeqNum)
+		if err == io.EOF {
+			continue
+		}
+		if err == errors.ErrChunkSkipped {
+			// todo option warming or db crashed
+			continue
+		}
+
+		if err != nil {
+			return err
+		}
+
+		if memDB.ApproximateSize() > int(dbImpl.opt.WriteBufferSize) {
+			err = dbImpl.writeLevel0Table(memDB, edit)
 			if err != nil {
 				return err
 			}
-
-			dbImpl.seqNum += writeBatch.seq + sequence(writeBatch.count) - 1
-			dbImpl.versionSet.markFileUsed(fd.Num)
+			memDB.UnRef()
+			memDB = dbImpl.mPoolGet(0)
+			memDB.Ref()
 		}
+
+		err = writeBatch.insertInto(memDB)
+		if err != nil {
+			return err
+		}
+
+		dbImpl.seqNum += writeBatch.seq + sequence(writeBatch.count) - 1
+		dbImpl.versionSet.markFileUsed(fd.Num)
 
 	}
 
