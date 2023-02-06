@@ -287,12 +287,12 @@ func (chunk *chunkReader) Read(p []byte) (nRead int, rErr error) {
 	jr := chunk.jr
 	for {
 
-		n, _ := jr.scratch.Read(p)
+		n, _ := jr.scratch.Read(p[nRead:])
 
 		nRead += n
 
 		// p is fill full
-		if n == cap(p) {
+		if nRead == cap(p) {
 			return
 		}
 
@@ -391,16 +391,18 @@ func (s *sequentialFile) readPhysicalRecord() (kRecordType byte, fragment []byte
 			return
 		}
 
-		actualSum := crc32.ChecksumIEEE(s.buf[s.physicalReadOffset+kJournalBlockHeaderLen : s.physicalReadOffset+kJournalBlockHeaderLen+dataLen])
+		start := s.physicalReadOffset + kJournalBlockHeaderLen
+		end := start + dataLen
+
+		actualSum := crc32.ChecksumIEEE(s.buf[start:end])
 		if expectedSum != actualSum {
 			kRecordType = kBadRecord
 			s.physicalReadOffset = s.physicalN // drop whole record
 			return
 		}
 
-		fragment = s.buf[s.physicalReadOffset : s.physicalReadOffset+dataLen]
-		s.physicalReadOffset += dataLen + kJournalBlockHeaderLen
-
+		fragment = s.buf[start:end]
+		s.physicalReadOffset = end
 		return
 
 	}

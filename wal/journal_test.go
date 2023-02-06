@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
+	"io"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -138,6 +139,33 @@ func Test_BasicWrite_Read(t *testing.T) {
 			writeOffset += kJournalBlockHeaderLen + writeLen
 		}
 
+		reader1, err := fs.NewSequentialReader(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		defer reader1.Close()
+
+		jr := NewJournalReader(reader1, true)
+		for {
+
+			chunkReader, err := jr.NextChunk()
+
+			if err == io.EOF {
+				break
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			p, err := ioutil.ReadAll(chunkReader)
+			if err == io.EOF {
+				continue
+			}
+
+			t.Logf("jr read bytes = %v", string(p))
+		}
 	})
 
 }
