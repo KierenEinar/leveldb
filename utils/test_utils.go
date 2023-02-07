@@ -14,14 +14,15 @@ var (
 func init() {
 	minAsciiUpper := uint8('A')
 	minAsciiLower := uint8('a')
+	minAsciiNumber := uint8('0')
 	for i := uint8(0); i < 26; i++ {
 		characters = append(characters, rune(minAsciiLower+i))
 	}
 	for i := uint8(0); i < 26; i++ {
 		characters = append(characters, rune(minAsciiUpper+i))
 	}
-	for i := 0; i < 10; i++ {
-		characters = append(characters, rune(i))
+	for i := uint8(0); i < 10; i++ {
+		characters = append(characters, rune(minAsciiNumber+i))
 	}
 }
 

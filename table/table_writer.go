@@ -315,7 +315,7 @@ func (tableWriter *Writer) Append(key, value []byte) (err error) {
 	dataBlockWriter := tableWriter.dataBlockWriter
 	filterWriter := tableWriter.filterWriter
 
-	if tableWriter.entries > 0 && bytes.Compare(dataBlockWriter.prevKey.Bytes(), key) > 0 {
+	if tableWriter.entries > 0 && tableWriter.comparer.Compare(dataBlockWriter.prevKey.Bytes(), key) > 0 {
 		err = errors.New("tableWriter Append ikey not sorted")
 		return
 	}
