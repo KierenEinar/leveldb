@@ -58,7 +58,7 @@ func (bf BloomFilter) MayContains(key, filter []byte) bool {
 	return true
 }
 
-func (bf *BloomFilter) Name() string {
+func (bf BloomFilter) Name() string {
 	return "bloomfilter"
 }
 
@@ -82,10 +82,11 @@ func (bf *BloomFilterGenerator) Generate(b *bytes.Buffer) {
 	for _, h := range bf.keysHash {
 		delta := h>>17 | h<<15
 		for i := uint8(0); i < bf.k; i++ {
-			bitPos := h % uint32(8)
-			bytePos := h / uint32(8)
+			bitPos := h % uint32(numBits)
+			bytePos := bitPos / 8
 			b := data[bytePos]
-			b = b | 1>>bitPos
+			posInByte := bitPos % 8
+			b = b | 0x80>>posInByte
 			data[bytePos] = b
 			h += delta
 		}

@@ -413,18 +413,20 @@ func (tableWriter *Writer) writeBlock(buf *bytes.Buffer, compressionType compres
 
 	blockTail := make([]byte, 5)
 	checkSum := crc32.ChecksumIEEE(buf.Bytes())
-
-	binary.LittleEndian.PutUint32(blockTail, checkSum)
+	binary.LittleEndian.PutUint32(blockTail[:4], checkSum)
 	blockTail[4] = byte(compressionType)
-
-	buf.Write(blockTail)
 
 	n, err := w.Write(buf.Bytes())
 	if err != nil {
 		return nil, err
 	}
 
-	tableWriter.offset += n
+	m, err := buf.Write(blockTail)
+	if err != nil {
+		return nil, err
+	}
+
+	tableWriter.offset += n + m
 
 	bh := &blockHandle{
 		offset: uint64(offset),
