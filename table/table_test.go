@@ -1,17 +1,16 @@
 package table
 
 import (
-	"fmt"
 	"hash/fnv"
 	"io/ioutil"
 	"os"
 	"testing"
 
 	"github.com/KierenEinar/leveldb/cache"
-	"github.com/KierenEinar/leveldb/storage"
-
 	"github.com/KierenEinar/leveldb/comparer"
 	"github.com/KierenEinar/leveldb/filter"
+
+	"github.com/KierenEinar/leveldb/storage"
 
 	"github.com/KierenEinar/leveldb/options"
 )
@@ -19,11 +18,11 @@ import (
 var (
 	opt *options.Options
 	fs  storage.Storage
+	tmp string
 )
 
 func TestMain(m *testing.M) {
-	tmp, _ := ioutil.TempDir(os.TempDir(), "abc")
-	fmt.Print(tmp)
+	tmp, _ = ioutil.TempDir(os.TempDir(), "abc")
 	fs, _ = storage.OpenPath(tmp)
 	opt = &options.Options{
 		CreateIfMissingCurrent:        false,
@@ -44,12 +43,18 @@ func TestMain(m *testing.M) {
 		MaxCompactionLimitFactor:      25,
 		DropWholeBlockOnParseChunkErr: false,
 	}
+
+	defer fs.Close()
+	defer os.RemoveAll(tmp)
+
 	m.Run()
-	_ = fs.Close()
-	_ = os.RemoveAll(tmp)
+
 }
 
 func TestNewWriter(t *testing.T) {
+
+	t.Logf("tmp=%s", tmp)
+
 	fd := storage.Fd{
 		FileType: storage.KTableFile,
 		Num:      rnd.Uint64() & 0xffffffff,
