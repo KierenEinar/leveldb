@@ -22,7 +22,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	tmp, _ := ioutil.TempDir(os.TempDir(), "")
+	tmp, _ := ioutil.TempDir(os.TempDir(), "abc")
 	fmt.Print(tmp)
 	fs, _ = storage.OpenPath(tmp)
 	opt = &options.Options{
@@ -62,7 +62,7 @@ func TestNewWriter(t *testing.T) {
 
 	tableWriter := NewWriter(w, opt)
 
-	kvs := randInputs(10000)
+	kvs := randInputs(1000, 10000, true)
 	for _, kv := range kvs {
 		if err := tableWriter.Append(kv.key, kv.value); err != nil {
 			t.Fatal(err)

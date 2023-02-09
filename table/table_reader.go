@@ -74,7 +74,7 @@ func (block *dataBlock) readRestartPoint(restartPoint int) (unShareKey []byte) {
 func (block *dataBlock) seekRestartPoint(key []byte) int {
 
 	n := sort.Search(block.restartPointNums, func(i int) bool {
-		restartPoint := binary.LittleEndian.Uint32(block.blockContent.data[block.restartPointOffset : block.restartPointOffset+i*4])
+		restartPoint := binary.LittleEndian.Uint32(block.blockContent.data[block.restartPointOffset+i*4 : block.restartPointOffset+(i+1)*4])
 		unShareKey := block.readRestartPoint(int(restartPoint))
 		result := block.cmp.Compare(unShareKey, key)
 		return result > 0

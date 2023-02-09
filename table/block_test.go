@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"sort"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func Test_dataBlock(t *testing.T) {
 	bw := newBlockWriter(16, comparer.DefaultComparer)
 	fmt.Println(bw)
 
-	inputs := randInputs(10)
+	inputs := randInputs(10, 20, false)
 
 	loopTimes := 0xff
 
@@ -75,14 +76,26 @@ func Test_dataBlock(t *testing.T) {
 
 }
 
-func randInputs(maxLen int) []kv {
-	inputs := make([]kv, rnd.Int()%maxLen+1)
+func randInputs(minLen, maxLen int, enableSort bool) []kv {
+
+	size := rnd.Int()%maxLen + 1
+	if size < minLen {
+		size = minLen
+	}
+	inputs := make([]kv, size)
 	for i := 0; i < len(inputs); i++ {
 		key := utils.RandString(16)
 		value := utils.RandString(100)
 		inputs[i].key = []byte(key)
 		inputs[i].value = []byte(value)
 	}
+
+	if enableSort {
+		sort.Slice(inputs, func(i, j int) bool {
+			return bytes.Compare(inputs[i].key, inputs[j].key) < 0
+		})
+	}
+
 	return inputs
 
 }

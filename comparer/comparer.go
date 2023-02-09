@@ -52,6 +52,11 @@ func (b BytesComparer) Successor(a []byte) (dest []byte) {
 
 // Separator return x that is gte a and lt b
 func (BytesComparer) Separator(a, b []byte) (dest []byte) {
+
+	if bytes.Compare(a, b) > 0 {
+		panic("BytesComparer a must lte b")
+	}
+
 	i, n := 0, len(a)
 	if n > len(b) {
 		n = len(b)
