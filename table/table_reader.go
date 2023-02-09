@@ -3,6 +3,7 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"sort"
 
@@ -27,6 +28,7 @@ type dataBlock struct {
 	blockContent       blockContent
 	restartPointOffset int
 	restartPointNums   int
+	offsets            []int
 }
 
 func newDataBlock(blockContent blockContent, cmp comparer.Comparer) (*dataBlock, error) {
@@ -37,6 +39,11 @@ func newDataBlock(blockContent blockContent, cmp comparer.Comparer) (*dataBlock,
 	}
 	restartPointNums := int(binary.LittleEndian.Uint32(data[len(data)-4:]))
 	restartPointOffset := len(data) - (restartPointNums+1)*4
+	offsets := make([]int, restartPointNums)
+	for i := 0; i < restartPointNums; i++ {
+		offsets[i] = int(binary.LittleEndian.Uint32(data[restartPointOffset+i*4 : restartPointOffset+(i+1)*4]))
+	}
+
 	block := &dataBlock{
 		blockContent:       blockContent,
 		restartPointNums:   restartPointNums,
@@ -77,6 +84,7 @@ func (block *dataBlock) seekRestartPoint(key []byte) int {
 		restartPoint := binary.LittleEndian.Uint32(block.blockContent.data[block.restartPointOffset+i*4 : block.restartPointOffset+(i+1)*4])
 		unShareKey := block.readRestartPoint(int(restartPoint))
 		result := block.cmp.Compare(unShareKey, key)
+		fmt.Printf("unShareKey=%v, key=%v\n", unShareKey, key)
 		return result > 0
 	})
 
@@ -95,7 +103,7 @@ type blockIter struct {
 	prevKey []byte
 	dir     iterator.Direction
 	err     error
-	ikey    []byte
+	key     []byte
 	value   []byte
 }
 
@@ -107,7 +115,7 @@ func newBlockIter(dataBlock *dataBlock, cmp comparer.Comparer) *blockIter {
 	br := &utils.BasicReleaser{
 		OnClose: func() {
 			bi.prevKey = nil
-			bi.ikey = nil
+			bi.key = nil
 			bi.value = nil
 		},
 	}
@@ -125,14 +133,15 @@ func (bi *blockIter) SeekFirst() bool {
 
 func (bi *blockIter) Seek(key []byte) bool {
 
-	bi.offset = bi.seekRestartPoint(key)
+	restartIx := bi.seekRestartPoint(key)
+	bi.offset = int(binary.LittleEndian.Uint32(
+		bi.dataBlock.blockContent.data[bi.restartPointOffset+restartIx*4 : bi.restartPointOffset+(restartIx+1)*4]))
 	bi.prevKey = bi.prevKey[:0]
-
 	for bi.Next() {
 		if bi.Valid() != nil {
 			return false
 		}
-		if bi.cmp.Compare(key, bi.ikey) >= 0 {
+		if bi.cmp.Compare(bi.key, key) >= 0 {
 			return true
 		}
 	}
@@ -159,7 +168,7 @@ func (bi *blockIter) Next() bool {
 	}
 
 	ikey := append(bi.prevKey[:shareKeyLen], unShareKey...)
-	bi.ikey = ikey
+	bi.key = ikey
 	bi.value = value
 	bi.prevKey = ikey
 	bi.offset = bi.offset + entryLen
@@ -171,7 +180,7 @@ func (bi *blockIter) Valid() error {
 }
 
 func (bi *blockIter) Key() []byte {
-	return bi.ikey
+	return bi.key
 }
 
 func (bi *blockIter) Value() []byte {
