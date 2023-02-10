@@ -174,3 +174,44 @@ func TestFileStorage_List(t *testing.T) {
 	fs.RemoveDir()
 
 }
+
+func TestFileStorage_NewAppendableFile(t *testing.T) {
+	tmp, _ := os.MkdirTemp(os.TempDir(), "")
+	defer os.RemoveAll(tmp)
+	t.Logf("tmpdir=%s", tmp)
+	fs, err := OpenPath(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fd := Fd{
+		FileType: KDBTempFile,
+		Num:      10855,
+	}
+
+	writer, err := fs.NewAppendableFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	p := bytes.Repeat([]byte{'x'}, 446)
+	_, err = writer.Write(p)
+
+	err = writer.Sync()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := fs.NewSequentialReader(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	data := make([]byte, 1024)
+	n, _ := reader.Read(data)
+
+	if n != 446 {
+		t.Fatal("writer write failed")
+	}
+
+}

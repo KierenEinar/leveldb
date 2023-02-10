@@ -375,11 +375,23 @@ func (tableWriter *Writer) Close() error {
 	if err != nil {
 		return err
 	}
-	return nil
+
+	w := tableWriter.writer
+
+	err = w.Flush()
+	if err != nil {
+		return err
+	}
+
+	if tableWriter.opt.WriteSync {
+		err = w.Sync()
+	}
+
+	return err
 }
 
 func (tableWriter *Writer) finishDataBlock() error {
-
+	tableWriter.dataBlockWriter.finish()
 	bh, err := tableWriter.writeBlock(tableWriter.dataBlockWriter.data, kCompressionTypeNone)
 	if err != nil {
 		return err
@@ -415,17 +427,17 @@ func (tableWriter *Writer) writeBlock(buf *bytes.Buffer, compressionType compres
 	binary.LittleEndian.PutUint32(blockTail[:4], checkSum)
 	blockTail[4] = byte(compressionType)
 
+	_, err := buf.Write(blockTail)
+	if err != nil {
+		return nil, err
+	}
+
 	n, err := w.Write(buf.Bytes())
 	if err != nil {
 		return nil, err
 	}
 
-	m, err := buf.Write(blockTail)
-	if err != nil {
-		return nil, err
-	}
-
-	tableWriter.offset += n + m
+	tableWriter.offset += n
 
 	bh := &blockHandle{
 		offset: uint64(offset),
@@ -461,17 +473,12 @@ func (tableWriter *Writer) flushFooter(indexBH, metaBH blockHandle) error {
 	_ = copy(footer[n1:], writeBH(nil, metaBH))
 	copy(footer[40:], magicByte)
 	w := tableWriter.writer
-	_, err := w.Write(footer)
+	n, err := w.Write(footer)
 	if err != nil {
 		return err
 	}
 
-	err = w.Sync()
-	if err != nil {
-		return err
-	}
-
-	tableWriter.offset += kTableFooterLen
+	tableWriter.offset += n
 	return nil
 }
 

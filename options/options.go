@@ -84,4 +84,7 @@ type Options struct {
 	// when part of journal chunk parse err, drop whole block. set default true, when set false,
 	// it will return error when recover log file or recover manifest.
 	DropWholeBlockOnParseChunkErr bool
+
+	// each write will call sync, set default false, using file page cache
+	WriteSync bool
 }

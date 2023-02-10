@@ -106,6 +106,10 @@ func TestBlockIter_Seek(t *testing.T) {
 	bi := newBlockIter(db, opt.InternalComparer)
 	defer bi.UnRef()
 
+	for bi.Next() {
+		t.Logf("key=%v, v=%v", bi.Key(), bi.Value())
+	}
+
 	// seek 16
 	seekData := make([]byte, 4)
 	binary.LittleEndian.PutUint32(seekData, uint32(16))
@@ -145,6 +149,103 @@ func TestBlockIter_Seek(t *testing.T) {
 
 	if !bytes.Equal(bi.Value(), seekData) {
 		t.Fatal("value not eq")
+	}
+
+}
+
+func TestWriter_ApproximateSize(t *testing.T) {
+
+	t.Logf("tmp=%s", tmp)
+
+	fd := storage.Fd{
+		FileType: storage.KTableFile,
+		Num:      rnd.Uint64() & 0xffffffff,
+	}
+	w, err := fs.NewAppendableFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	tableWriter := NewWriter(w, opt)
+
+	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+	for _, c := range letters {
+		s := byte(c)
+		if err := tableWriter.Append([]byte{s}, []byte{s}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := tableWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	size := tableWriter.ApproximateSize()
+
+	reader, err := fs.NewSequentialReader(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	data := make([]byte, 1000)
+
+	n, err := reader.Read(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n != size {
+		t.Fatalf("approsimate size not eq file size, approsimate size=%d, file size=%d", size, n)
+	}
+
+}
+
+func TestReader_NewIterator(t *testing.T) {
+
+	t.Logf("tmp=%s", tmp)
+
+	fd := storage.Fd{
+		FileType: storage.KTableFile,
+		Num:      rnd.Uint64() & 0xffffffff,
+	}
+	w, err := fs.NewAppendableFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	tableWriter := NewWriter(w, opt)
+
+	kvs := randInputs(1000, 10000, true)
+	for _, kv := range kvs {
+		if err := tableWriter.Append(kv.key, kv.value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := tableWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := fs.NewRandomAccessReader(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tr, err := NewTableReader(opt, r, tableWriter.ApproximateSize())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.UnRef()
+
+	iter := tr.NewIterator()
+	defer iter.UnRef()
+
+	for iter.Next() {
+		t.Logf("k=%v, v=%v", string(iter.Key()), string(iter.Value()))
 	}
 
 }

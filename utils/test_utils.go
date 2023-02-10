@@ -6,9 +6,9 @@ import (
 )
 
 var (
-	rnd        = rand.New(rand.NewSource(time.Now().Unix()))
-	characters = make([]rune, 0, 62)
-	hex        = []rune("0123456789abcdef")
+	rnd    = rand.New(rand.NewSource(time.Now().Unix()))
+	letter = make([]rune, 0, 62)
+	hex    = []rune("0123456789abcdef")
 )
 
 func init() {
@@ -16,13 +16,13 @@ func init() {
 	minAsciiLower := uint8('a')
 	minAsciiNumber := uint8('0')
 	for i := uint8(0); i < 26; i++ {
-		characters = append(characters, rune(minAsciiLower+i))
+		letter = append(letter, rune(minAsciiLower+i))
 	}
 	for i := uint8(0); i < 26; i++ {
-		characters = append(characters, rune(minAsciiUpper+i))
+		letter = append(letter, rune(minAsciiUpper+i))
 	}
 	for i := uint8(0); i < 10; i++ {
-		characters = append(characters, rune(minAsciiNumber+i))
+		letter = append(letter, rune(minAsciiNumber+i))
 	}
 }
 
@@ -30,8 +30,8 @@ func RandString(maxLen int) string {
 	randLen := rnd.Int()%maxLen + 1
 	r := make([]rune, 0, randLen)
 	for i := 0; i < randLen; i++ {
-		randPos := rnd.Int() % len(characters)
-		r = append(r, characters[randPos])
+		randPos := rnd.Int() % len(letter)
+		r = append(r, letter[randPos])
 	}
 	return string(r)
 }
