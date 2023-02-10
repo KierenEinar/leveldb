@@ -49,6 +49,7 @@ func newDataBlock(blockContent blockContent, cmp comparer.Comparer) (*dataBlock,
 		restartPointNums:   restartPointNums,
 		restartPointOffset: restartPointOffset,
 		cmp:                cmp,
+		offsets:            offsets,
 	}
 	return block, nil
 }
@@ -242,6 +243,11 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 
 	tr.indexBlock = indexBlock
 	err = tr.readMeta()
+
+	if err == nil {
+		reader = tr
+	}
+
 	return
 }
 
@@ -293,7 +299,7 @@ func (reader *Reader) readMeta() (err error) {
 		if err == nil {
 
 			iter := newBlockIter(block, reader.cmp)
-			if iter.Seek([]byte(key)) && iter.Valid() != nil {
+			if iter.Seek([]byte(key)) && iter.Valid() == nil {
 				reader.readFilter(iter.Value())
 			}
 			iter.UnRef()
@@ -327,8 +333,8 @@ func (reader *Reader) readBlock(bh blockHandle) (content blockContent, err error
 	}
 	blockContentLen := int(bh.length)
 
-	compressType := data[blockContentLen]
-	checkSum := binary.LittleEndian.Uint32(data[blockContentLen+1:])
+	compressType := data[blockContentLen+kBlockTailLen-1]
+	checkSum := binary.LittleEndian.Uint32(data[blockContentLen : blockContentLen+kBlockTailLen-1])
 
 	if !reader.opt.NoVerifyCheckSum {
 		if crc32.ChecksumIEEE(data[:blockContentLen]) != checkSum {
@@ -337,6 +343,8 @@ func (reader *Reader) readBlock(bh blockHandle) (content blockContent, err error
 			return
 		}
 	}
+
+	data = data[:bh.length]
 
 	switch compressionType(compressType) {
 	case kCompressionTypeNone:
@@ -563,11 +571,6 @@ func (reader *Reader) newFilterBlockReader(bh blockHandle, filterPolicy filter.I
 	}
 
 	offsetsOffset := binary.LittleEndian.Uint32(blockContent.data[n-5 : n-1])
-	if offsetsOffset > uint32(n)-5 {
-		err = errors.NewErrCorruption("filterPolicy data offset's offset")
-		return
-	}
-
 	baseLg := blockContent.data[n-1]
 	blockNum := (uint32(n)-1-offsetsOffset)/4 - 1
 	fReader = &filterBlockReader{

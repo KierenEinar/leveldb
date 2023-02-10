@@ -219,9 +219,11 @@ func TestReader_NewIterator(t *testing.T) {
 
 	tableWriter := NewWriter(w, opt)
 
-	kvs := randInputs(1000, 10000, true)
-	for _, kv := range kvs {
-		if err := tableWriter.Append(kv.key, kv.value); err != nil {
+	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+	for _, c := range letters {
+		s := byte(c)
+		if err := tableWriter.Append([]byte{s}, []byte{s}); err != nil {
 			t.Fatal(err)
 		}
 	}

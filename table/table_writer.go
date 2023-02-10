@@ -210,6 +210,7 @@ type filterWriter struct {
 	nkeys           int
 	baseLg          uint8
 	filterGenerator filter.IFilterGenerator
+	blockWriter     *blockWriter
 }
 
 func newFilterWriter(iFilter filter.IFilter, baseLg uint8) *filterWriter {
@@ -357,15 +358,15 @@ func (tableWriter *Writer) Close() error {
 
 	// flush meta block
 	metaBlockWriter := tableWriter.metaBlockWriter
-	metaBlockWriter.append([]byte(tableWriter.opt.FilterPolicy.Name()), writeBH(nil, *bh))
-	metaBH, err := tableWriter.writeBlock(metaBlockWriter.data, kCompressionTypeNone)
+	metaBlockWriter.append([]byte("filter."+tableWriter.opt.FilterPolicy.Name()), writeBH(nil, *bh))
+	metaBH, err := tableWriter.finishBlock(metaBlockWriter, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
 
 	// flush index block
 	indexBlockWriter := tableWriter.indexBlockWriter
-	indexBH, err := tableWriter.writeBlock(indexBlockWriter.data, kCompressionTypeNone)
+	indexBH, err := tableWriter.finishBlock(indexBlockWriter, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
@@ -390,9 +391,14 @@ func (tableWriter *Writer) Close() error {
 	return err
 }
 
+func (tableWriter *Writer) finishBlock(bw *blockWriter, compressionType compressionType) (bh *blockHandle, err error) {
+	bw.finish()
+	bh, err = tableWriter.writeBlock(bw.data, compressionType)
+	return
+}
+
 func (tableWriter *Writer) finishDataBlock() error {
-	tableWriter.dataBlockWriter.finish()
-	bh, err := tableWriter.writeBlock(tableWriter.dataBlockWriter.data, kCompressionTypeNone)
+	bh, err := tableWriter.finishBlock(tableWriter.dataBlockWriter, kCompressionTypeNone)
 	if err != nil {
 		return err
 	}
@@ -413,6 +419,7 @@ func (tableWriter *Writer) finishFilterBlock() (*blockHandle, error) {
 		binary.LittleEndian.PutUint32(offsetBuf, uint32(offset))
 		filterWriter.data.Write(offsetBuf)
 	}
+	filterWriter.data.WriteByte(filterWriter.baseLg)
 	return tableWriter.writeBlock(filterWriter.data, kCompressionTypeNone)
 }
 
