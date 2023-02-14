@@ -17,11 +17,6 @@ var (
 	rnd = rand.New(rand.NewSource(time.Now().Unix()))
 )
 
-type kv struct {
-	key   []byte
-	value []byte
-}
-
 func Test_dataBlock(t *testing.T) {
 
 	bw := newBlockWriter(16, comparer.DefaultComparer)
@@ -33,7 +28,7 @@ func Test_dataBlock(t *testing.T) {
 
 	for i := 0; i < loopTimes; i++ {
 		for _, input := range inputs {
-			bw.append(input.key, input.value)
+			bw.append(input.k, input.v)
 		}
 	}
 
@@ -52,12 +47,12 @@ func Test_dataBlock(t *testing.T) {
 	idx := 0
 	for iter.Next() {
 		input := inputs[idx%len(inputs)]
-		if !bytes.Equal(input.key, iter.Key()) {
-			t.Fatalf("key not eq input, input=%s, key=%s", input.key, iter.Key())
+		if !bytes.Equal(input.k, iter.Key()) {
+			t.Fatalf("key not eq input, input=%s, key=%s", input.k, iter.Key())
 		}
 
-		if !bytes.Equal(input.value, iter.Value()) {
-			t.Fatalf("value not eq input, input=%s, key=%s", input.value, iter.Value())
+		if !bytes.Equal(input.v, iter.Value()) {
+			t.Fatalf("value not eq input, input=%s, key=%s", input.v, iter.Value())
 		}
 		t.Logf("key=%s, value=%s", iter.Key(), iter.Value())
 		idx++
@@ -86,13 +81,13 @@ func randInputs(minLen, maxLen int, enableSort bool) []kv {
 	for i := 0; i < len(inputs); i++ {
 		key := utils.RandString(16)
 		value := utils.RandString(100)
-		inputs[i].key = []byte(key)
-		inputs[i].value = []byte(value)
+		inputs[i].k = []byte(key)
+		inputs[i].v = []byte(value)
 	}
 
 	if enableSort {
 		sort.Slice(inputs, func(i, j int) bool {
-			return bytes.Compare(inputs[i].key, inputs[j].key) < 0
+			return bytes.Compare(inputs[i].k, inputs[j].k) < 0
 		})
 	}
 

@@ -74,7 +74,7 @@ func TestNewWriter(t *testing.T) {
 
 	kvs := randInputs(1000, 10000, true)
 	for _, kv := range kvs {
-		if err := tableWriter.Append(kv.key, kv.value); err != nil {
+		if err := tableWriter.Append(kv.k, kv.v); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -310,13 +310,64 @@ func TestReader_FindKey(t *testing.T) {
 	defer tr.UnRef()
 
 	for _, input := range inputs {
-		rKey, err := tr.FindKey(input)
+		_, err := tr.FindKey(input)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("findkey=%s, input=%s", rKey, input)
+		//t.Logf("findkey=%s, input=%s", rKey, input)
 	}
 
+}
+
+func TestDump_Format(t *testing.T) {
+	t.Logf("tmp=%s", tmp)
+
+	fd := storage.Fd{
+		FileType: storage.KTableFile,
+		Num:      rnd.Uint64() & 0xffffffff,
+	}
+	w, err := fs.NewAppendableFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	tableWriter := NewWriter(w, opt)
+
+	const size = 6
+	var inputSize = 1024 * 10 // generate gte 1m input
+	inputs := make([][]byte, inputSize)
+
+	for ix := range inputs {
+		inputs[ix] = []byte(utils.RandHexByLen(size))
+	}
+
+	sort.Slice(inputs, func(i, j int) bool {
+		return bytes.Compare(inputs[i], inputs[j]) < 0
+	})
+
+	for ix := range inputs {
+		if err = tableWriter.Append(inputs[ix], inputs[ix]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := tableWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := fs.NewSequentialReader(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer r.Close()
+
+	dump := NewDump(r, os.Stdout)
+	err = dump.Format()
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestReader_Get(t *testing.T) {

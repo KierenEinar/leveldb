@@ -139,6 +139,7 @@ func (bw *blockWriter) append(key []byte, value []byte) {
 
 	if bw.entries%bw.restartThreshold == 0 {
 		bw.restarts = append(bw.restarts, bw.offset)
+		bw.prevKey.Reset()
 	}
 
 	bw.writeEntry(key, value)
@@ -470,7 +471,6 @@ func (tableWriter *Writer) flushPendingBH(key []byte) {
 	bhEntry := writeBH(tableWriter.scratch[30:], *tableWriter.pendingBH)
 	indexBlockWriter.append(separator, bhEntry)
 	tableWriter.pendingBH = nil
-	tableWriter.dataBlockWriter.prevKey.Reset()
 	return
 }
 

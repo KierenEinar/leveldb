@@ -3,7 +3,6 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"hash/crc32"
 	"sort"
 
@@ -85,7 +84,6 @@ func (block *dataBlock) seekRestartPoint(key []byte) int {
 		restartPoint := binary.LittleEndian.Uint32(block.blockContent.data[block.restartPointOffset+i*4 : block.restartPointOffset+(i+1)*4])
 		unShareKey := block.readRestartPoint(int(restartPoint))
 		result := block.cmp.Compare(unShareKey, key)
-		fmt.Printf("unShareKey=%v, key=%v\n", unShareKey, key)
 		return result > 0
 	})
 
