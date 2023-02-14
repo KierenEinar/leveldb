@@ -46,6 +46,24 @@ func RandHex(maxLen int) string {
 	return string(r)
 }
 
+func RandStringByLen(size int) string {
+	r := make([]rune, 0, size)
+	for i := 0; i < size; i++ {
+		randPos := rnd.Int() % len(letter)
+		r = append(r, letter[randPos])
+	}
+	return string(r)
+}
+
+func RandHexByLen(size int) string {
+	r := make([]rune, 0, size)
+	for i := 0; i < size; i++ {
+		randPos := rnd.Int() % len(hex)
+		r = append(r, hex[randPos])
+	}
+	return string(r)
+}
+
 func LetterRunes() []rune {
 	return letter
 }
