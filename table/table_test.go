@@ -219,8 +219,8 @@ func TestReader_NewIterator(t *testing.T) {
 
 	tableWriter := NewWriter(w, opt)
 
-	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
+	var letters = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	letters = bytes.Repeat(letters, 1024)
 	for _, c := range letters {
 		s := byte(c)
 		if err := tableWriter.Append([]byte{s}, []byte{s}); err != nil {
