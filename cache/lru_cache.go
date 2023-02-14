@@ -49,7 +49,7 @@ type HandleTable struct {
 }
 
 func NewHandleTable(slots uint32) *HandleTable {
-	realSlots := uint32(0)
+	realSlots := htInitSlots
 	for i := htInitSlots; i < 32; i++ {
 		if slots < 1<<i {
 			realSlots = 1 << i
@@ -104,7 +104,7 @@ func (ht *HandleTable) Erase(key []byte, hash uint32) *LRUHandle {
 func (ht *HandleTable) FindPointer(key []byte, hash uint32) **LRUHandle {
 	slot := hash & (ht.slots - 1)
 	ptr := &ht.list[slot]
-	for *ptr != nil && (*ptr).hash != hash || bytes.Compare((*ptr).key, key) != 0 {
+	for *ptr != nil && ((*ptr).hash != hash || bytes.Compare((*ptr).key, key) != 0) {
 		ptr = &(*ptr).nextHash
 	}
 	return ptr
