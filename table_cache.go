@@ -94,7 +94,7 @@ func (c *TableCache) findTable(tFile *tFile, cacheHandle **cache.LRUHandle) (err
 			err = rErr
 			return
 		}
-		tReader, rErr := table.NewTableReader(c.opt, reader, tFile.size)
+		tReader, rErr := table.NewTableReader(c.opt, reader, tFile.size, uint64(tFile.fd))
 		if rErr != nil {
 			err = rErr
 			return

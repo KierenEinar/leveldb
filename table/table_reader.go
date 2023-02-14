@@ -201,7 +201,7 @@ type Reader struct {
 	cacheId           uint64
 }
 
-func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize int) (reader *Reader, err error) {
+func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize int, cacheId uint64) (reader *Reader, err error) {
 	var (
 		footerBlockContent blockContent
 		indexBlockContent  blockContent
@@ -221,6 +221,7 @@ func NewTableReader(opt *options.Options, r storage.RandomAccessReader, fileSize
 		cmp:           opt.InternalComparer,
 		opt:           opt,
 		BasicReleaser: &utils.BasicReleaser{},
+		cacheId:       cacheId,
 	}
 	tr.Ref()
 	tr.RegisterCleanUp(tr.Close)

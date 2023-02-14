@@ -220,10 +220,9 @@ func TestReader_NewIterator(t *testing.T) {
 	tableWriter := NewWriter(w, opt)
 
 	var letters = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-	letters = bytes.Repeat(letters, 1024)
+	letters = bytes.Repeat(letters, 1024*10)
 	for _, c := range letters {
-		s := byte(c)
-		if err := tableWriter.Append([]byte{s}, []byte{s}); err != nil {
+		if err := tableWriter.Append([]byte{c}, []byte{c}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -237,7 +236,7 @@ func TestReader_NewIterator(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tr, err := NewTableReader(opt, r, tableWriter.ApproximateSize())
+	tr, err := NewTableReader(opt, r, tableWriter.ApproximateSize(), fd.Num)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,8 +245,19 @@ func TestReader_NewIterator(t *testing.T) {
 	iter := tr.NewIterator()
 	defer iter.UnRef()
 
+	processed := 0
 	for iter.Next() {
-		t.Logf("k=%s, v=%s", string(iter.Key()), string(iter.Value()))
+		if iter.Key()[0] == 'Z' {
+			processed++
+		}
 	}
+
+	if processed != 1024*10 {
+		t.Fatalf("processed failed, expected=%d, actual=%d", 1024*10, processed)
+	}
+
+}
+
+func TestReader_Get(t *testing.T) {
 
 }

@@ -45,3 +45,19 @@ func RandHex(maxLen int) string {
 	}
 	return string(r)
 }
+
+func LetterRunes() []rune {
+	return letter
+}
+
+func LetterBytes() []byte {
+	return []byte(string(letter))
+}
+
+func ForeachLetter(loopTimes int, f func(i int, c rune)) {
+	for i := 0; i < loopTimes; i++ {
+		for ix := 0; ix < len(letter); ix++ {
+			f(ix, letter[ix])
+		}
+	}
+}
