@@ -247,7 +247,7 @@ func TestReader_NewIterator(t *testing.T) {
 	defer iter.UnRef()
 
 	for iter.Next() {
-		t.Logf("k=%v, v=%v", string(iter.Key()), string(iter.Value()))
+		t.Logf("k=%s, v=%s", string(iter.Key()), string(iter.Value()))
 	}
 
 }

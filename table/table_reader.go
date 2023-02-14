@@ -419,7 +419,7 @@ func (reader *Reader) blockReader(bh blockHandle) (iter iterator.Iterator, err e
 	} else {
 		blockIter.RegisterCleanUp(releaseContent, &content)
 	}
-
+	iter = blockIter
 	return
 }
 
