@@ -9,6 +9,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/KierenEinar/leveldb/errors"
+
 	"github.com/KierenEinar/leveldb/utils"
 
 	"github.com/KierenEinar/leveldb/cache"
@@ -315,6 +317,21 @@ func TestReader_FindKey(t *testing.T) {
 			t.Fatal(err)
 		}
 		//t.Logf("findkey=%s, input=%s", rKey, input)
+	}
+
+	_, err = tr.FindKey([]byte("a"))
+	if err != errors.ErrNotFound {
+		t.Fatal("find key err")
+	}
+
+	_, err = tr.FindKey([]byte("b"))
+	if err != errors.ErrNotFound {
+		t.Fatal("find key err")
+	}
+
+	_, err = tr.FindKey([]byte("c"))
+	if err != errors.ErrNotFound {
+		t.Fatal("find key err")
 	}
 
 }
