@@ -67,6 +67,8 @@ type formatter interface {
 	print(w io.Writer)
 }
 
+const maxColumn = 100
+
 type dumpFooter struct {
 	indexBlock blockHandle
 	metaBlock  blockHandle
@@ -80,18 +82,19 @@ func (f *dumpFooter) print(w io.Writer) {
 	meta_block: ["offset":0, "length":100]
 	magic: ["xxsdsds"]
 	**/
+
 	buf := bytes.NewBuffer(nil)
 	buf.WriteString("footer\n")
 
-	buf.WriteString(fmt.Sprintf("index_block: [\"offset\":%d, \"length\":%d]\n", f.indexBlock.offset,
+	buf.WriteString(fmt.Sprintf("index_block: {\"offset\":%d, \"length\":%d}\n", f.indexBlock.offset,
 		f.indexBlock.length))
 
-	buf.WriteString(fmt.Sprintf("meta_block: [\"offset\":%d, \"length\":%d]\n", f.metaBlock.offset,
+	buf.WriteString(fmt.Sprintf("meta_block: {\"offset\":%d, \"length\":%d}\n", f.metaBlock.offset,
 		f.metaBlock.length))
 
 	buf.WriteString(fmt.Sprintf("magic: [\"%s\"]\n", f.magic))
 
-	_, _ = w.Write(buf.Bytes())
+	_, _ = buf.WriteTo(w)
 
 }
 
@@ -120,6 +123,8 @@ func (d *dumpDataBlock) print(w io.Writer) {
 	// main body
 	buf.WriteString("body: ")
 	buf.WriteString("[")
+	_, _ = buf.WriteTo(w)
+
 	for idx, kv := range d.kvPairs {
 		buf.WriteString(fmt.Sprintf("\"%s\"", kv.k))
 		buf.WriteString(":")
@@ -127,8 +132,13 @@ func (d *dumpDataBlock) print(w io.Writer) {
 		if idx < len(d.kvPairs)-1 {
 			buf.WriteString(", ")
 		}
+		if buf.Len() > maxColumn {
+			buf.WriteString("\n")
+			_, _ = buf.WriteTo(w)
+		}
 	}
-	buf.WriteString("]\n")
+	buf.WriteString("]\n\n")
+	_, _ = buf.WriteTo(w)
 
 	// restart_point
 	buf.WriteString("restart_point:[")
@@ -137,13 +147,18 @@ func (d *dumpDataBlock) print(w io.Writer) {
 		if idx < len(d.restartPointKeys)-1 {
 			buf.WriteString(", ")
 		}
+		if buf.Len() > maxColumn {
+			buf.WriteString("\n")
+			_, _ = buf.WriteTo(w)
+		}
 	}
-	buf.WriteString("]\n")
+	buf.WriteString("]\n\n")
+	_, _ = buf.WriteTo(w)
 
 	// restart_nums
 	buf.WriteString(fmt.Sprintf("restart_num: %d\n\n", d.restartNum))
 
-	_, _ = w.Write(buf.Bytes())
+	_, _ = buf.WriteTo(w)
 
 }
 
@@ -171,26 +186,40 @@ func (f *dumpFilter) print(w io.Writer) {
 
 	buf := bytes.NewBuffer(nil)
 	buf.WriteString("filter_block\n")
+	_, _ = buf.WriteTo(w)
+
 	for idx, block := range f.dumpBitmap {
 		buf.WriteString(fmt.Sprintf("filter_data_%d: ", idx))
 		buf.WriteString("[")
+		_, _ = buf.WriteTo(w)
 		for _, bit := range block.bitmap {
 			buf.WriteString(strconv.Itoa(int(bit)))
+			if buf.Len() > maxColumn {
+				buf.WriteString("\n")
+				_, _ = buf.WriteTo(w)
+			}
 		}
 		buf.WriteString("]\n")
+		_, _ = buf.WriteTo(w)
 	}
+	_, _ = buf.WriteTo(w)
 
 	buf.WriteString("offsets: ")
 	buf.WriteString("[")
+	_, _ = buf.WriteTo(w)
 	for idx, offset := range f.offsets {
 		buf.WriteString(strconv.Itoa(offset))
 		if idx < len(f.offsets)-1 {
 			buf.WriteString(", ")
 		}
+		if buf.Len() > maxColumn {
+			buf.WriteString("\n")
+			_, _ = buf.WriteTo(w)
+		}
 	}
 	buf.WriteString("]\n\n")
 
-	_, _ = w.Write(buf.Bytes())
+	_, _ = buf.WriteTo(w)
 
 }
 

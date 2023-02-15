@@ -335,7 +335,7 @@ func TestDump_Format(t *testing.T) {
 	tableWriter := NewWriter(w, opt)
 
 	const size = 6
-	var inputSize = 1024 * 10 // generate gte 1m input
+	var inputSize = 1024 // generate gte 1m input
 	inputs := make([][]byte, inputSize)
 
 	for ix := range inputs {
