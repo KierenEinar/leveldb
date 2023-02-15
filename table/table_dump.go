@@ -12,48 +12,47 @@ import (
 )
 
 /**
-dump output e.g
-restart_interval: 4
-inputs : ["a":"xx", "b":"xx", "c":"xx", "d":"xx", "e":"xx", "f":"xx", "g":"xx"]
+dump ldb file
 
-output:
-datablock_0:
-body: ["a":"xx", "b":"xx", "c":"xx", "d":"xx", "e":"xx", "f":"xx", "g":"xx"]
-restart_point: [a,d]
-restart_num: 2
+data_block
+datablock_0
+body: ["A00":"A00", "B00":"B00", "C00":"C00", "D00":"D00", "E00":"E00", "F00":"F00", "G00":"G00", "H00":"H00",
+"I00":"I00", "J00":"J00", "K00":"K00", "L00":"L00", "M00":"M00", "N00":"N00", "O00":"O00", "P00":"P00",
+"Q00":"Q00", "R00":"R00", "S00":"S00", "T00":"T00", "U00":"U00", "V00":"V00", "W00":"W00", "X00":"X00",
+"Y00":"Y00", "Z00":"Z00", "a00":"a00", "b00":"b00", "c00":"c00", "d00":"d00", "e00":"e00", "f00":"f00",
+"g00":"g00", "h00":"h00", "i00":"i00", "j00":"j00", "k00":"k00", "l00":"l00", "m00":"m00", "n00":"n00",
+"o00":"o00", "p00":"p00", "q00":"q00", "r00":"r00", "s00":"s00", "t00":"t00", "u00":"u00", "v00":"v00",
+"w00":"w00", "x00":"x00", "y00":"y00", "z00":"z00"]
 
-datablock_1:
-body: ["a":"xx", "b":"xx", "c":"xx", "d":"xx", "e":"xx", "f":"xx", "g":"xx"]
-restart_point: [a,d]
-restart_num: 2
+restart_point:["A00", "Q00", "g00", "w00"]
 
-.
-.
-.
+restart_num: 4
 
-filter body: [byte ....]
-filter_baselg: 10
-.
-.
-.
+filter_block
+filter_data_0: [00011010000110010110100001100010011110010111100000111100111100001110010101011011001110010001101011001
+01011000001100110110011000011100111001100100011110100010011100010110110100001101001100110001100010111
+00001010001101011011101100111101110111011000101101111110001101010101001101111011100110010111100111011
+01110100011000111000101011101010010000011101110101010111001000001001001010101000100001110011011101101
+00001010110100101010101111001101100100100011110101110010100111010100010111110100100111101011001010101
+01101100001100000000111]
+offsets: [0, 66]
 
-meta block:
-body: ["filter.name", offset: xx, len: xxx]
-.
-.
-.
+meta_block: ["filter.bloomfilter""offset":493, "len":75]
 
-index block:
-body: ["a":{"offset":0, "length":100} "b", "c", "d", "e", "f", "g"]
-restart_point: [a,d]
-restart_num: 2
+index_block
+datablock_0
+body: ["{":"{"offset":0, "length":488}"]
 
+restart_point:["{"]
 
-footer:
-index_block: ["offset":0, "length":100]
-meta_block: ["offset":0, "length":100]
-magic: ["xxsdsds"]
+restart_num: 1
 
+footer
+index_block: {"offset":610, "length":15}
+meta_block: {"offset":573, "length":32}
+magic: ["W���$uG�"]
+
+statics: ["datablock key_count=52", "indexblock key_count=1"]
 
 */
 type Dump struct {

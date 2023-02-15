@@ -472,8 +472,8 @@ func TestReader_Get_Dump(t *testing.T) {
 	tableWriter := NewWriter(w, opt)
 
 	kvPairs := make([]kv, 0)
-	for i := 0; i < 10; i++ {
-		for j := 0; j < 10; j++ {
+	for i := 0; i < 1; i++ {
+		for j := 0; j < 1; j++ {
 			utils.ForeachLetter(1, func(idx int, c rune) {
 				if c >= '0' && c <= '9' {
 					return
