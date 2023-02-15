@@ -92,7 +92,7 @@ func (f *dumpFooter) print(w io.Writer) {
 	buf.WriteString(fmt.Sprintf("meta_block: {\"offset\":%d, \"length\":%d}\n", f.metaBlock.offset,
 		f.metaBlock.length))
 
-	buf.WriteString(fmt.Sprintf("magic: [\"%s\"]\n", f.magic))
+	buf.WriteString(fmt.Sprintf("magic: [\"%s\"]\n\n", f.magic))
 
 	_, _ = buf.WriteTo(w)
 
@@ -260,20 +260,33 @@ type dumpSSTable struct {
 	metaBlock   *dumpMetaBlock
 	indexBlock  *dumpDataBlock
 	footer      *dumpFooter
+	statics
+}
+
+type statics struct {
+	dataBlockKeyCount  int
+	indexBlockKeyCount int
 }
 
 func (f *dumpSSTable) print(w io.Writer) {
 
-	w.Write([]byte("data_block\n"))
+	_, _ = w.Write([]byte("data_block\n"))
 	for _, d := range f.dataBlocks {
 		d.print(w)
+		f.statics.dataBlockKeyCount += len(d.kvPairs)
 	}
 
 	f.filterBlock.print(w)
 	f.metaBlock.print(w)
-	w.Write([]byte("index_block\n"))
+	_, _ = w.Write([]byte("index_block\n"))
 	f.indexBlock.print(w)
 	f.footer.print(w)
+
+	f.statics.indexBlockKeyCount += len(f.indexBlock.kvPairs)
+
+	statics := fmt.Sprintf("statics: [\"datablock key_count=%d\", \"indexblock key_count=%d\"]\n",
+		f.statics.dataBlockKeyCount, f.statics.indexBlockKeyCount)
+	_, _ = w.Write([]byte(statics))
 }
 
 func (dump *Dump) readFooter() (*dumpFooter, error) {

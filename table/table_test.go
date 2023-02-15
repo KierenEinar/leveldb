@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/KierenEinar/leveldb/errors"
@@ -452,5 +453,83 @@ func TestReader_Get(t *testing.T) {
 	if err != errors.ErrNotFound {
 		t.Fatal(err)
 	}
+
+}
+
+func TestReader_Get_Dump(t *testing.T) {
+	t.Logf("tmp=%s", tmp)
+
+	fd := storage.Fd{
+		FileType: storage.KTableFile,
+		Num:      rnd.Uint64() & 0xffffffff,
+	}
+	w, err := fs.NewAppendableFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	tableWriter := NewWriter(w, opt)
+
+	kvPairs := make([]kv, 0)
+	for i := 0; i < 10; i++ {
+		for j := 0; j < 10; j++ {
+			utils.ForeachLetter(1, func(idx int, c rune) {
+				if c >= '0' && c <= '9' {
+					return
+				}
+				s := string(c) + strconv.Itoa(i) + strconv.Itoa(j)
+				key := []byte(s)
+				value := append([]byte(nil), key...)
+				kv := kv{
+					k: key,
+					v: value,
+				}
+				kvPairs = append(kvPairs, kv)
+			})
+		}
+	}
+
+	sort.Slice(kvPairs, func(i, j int) bool {
+		return bytes.Compare(kvPairs[i].k, kvPairs[j].k) < 0
+	})
+
+	for _, kv := range kvPairs {
+		if err := tableWriter.Append(kv.k, kv.v); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := tableWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := fs.NewRandomAccessReader(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tr, err := NewTableReader(opt, r, tableWriter.ApproximateSize(), fd.Num)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.UnRef()
+
+	for _, kv := range kvPairs {
+		v, err := tr.Get(kv.k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Compare(kv.k, v) != 0 {
+			t.Fatal("value not eq")
+		}
+	}
+
+	seqReader, _ := fs.NewSequentialReader(fd)
+	defer seqReader.Close()
+
+	dump := NewDump(seqReader, os.Stdout)
+
+	dump.Format()
 
 }
