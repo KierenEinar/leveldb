@@ -389,4 +389,68 @@ func TestDump_Format(t *testing.T) {
 
 func TestReader_Get(t *testing.T) {
 
+	t.Logf("tmp=%s", tmp)
+
+	fd := storage.Fd{
+		FileType: storage.KTableFile,
+		Num:      rnd.Uint64() & 0xffffffff,
+	}
+	w, err := fs.NewAppendableFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	tableWriter := NewWriter(w, opt)
+
+	const size = 6
+	var inputSize = 1024
+	inputs := make([][]byte, inputSize)
+
+	for ix := range inputs {
+		inputs[ix] = []byte(utils.RandHexByLen(size))
+	}
+
+	sort.Slice(inputs, func(i, j int) bool {
+		return bytes.Compare(inputs[i], inputs[j]) < 0
+	})
+
+	for ix := range inputs {
+		if err = tableWriter.Append(inputs[ix], inputs[ix]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := tableWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := fs.NewRandomAccessReader(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tr, err := NewTableReader(opt, r, tableWriter.ApproximateSize(), fd.Num)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.UnRef()
+
+	for _, input := range inputs {
+		value, err := tr.Get(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(value, input) {
+			t.Fatalf("value not eq key")
+		}
+		t.Logf("key=%s, value=%s", string(input), string(value))
+	}
+
+	_, err = tr.Get([]byte("hello world"))
+	if err != errors.ErrNotFound {
+		t.Fatal(err)
+	}
+
 }
