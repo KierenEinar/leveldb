@@ -244,9 +244,9 @@ func (skl *SkipList) NewIterator() iterator.Iterator {
 	sklIter := &SkipListIter{
 		skl: skl,
 	}
-	sklIter.OnClose = func() {
+	skl.RegisterCleanUp(func(args ...interface{}) {
 		skl.UnRef()
-	}
+	})
 	return sklIter
 }
 

@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"strconv"
 
+	"github.com/KierenEinar/leveldb/filter"
+
 	"github.com/KierenEinar/leveldb/errors"
 )
 
@@ -58,6 +60,7 @@ statics: ["datablock key_count=52", "indexblock key_count=1"]
 type Dump struct {
 	data        []byte
 	dumpSSTable *dumpSSTable
+	iFilter     filter.IFilter
 	r           io.Reader
 	w           io.Writer
 }
@@ -224,6 +227,8 @@ func (f *dumpFilter) print(w io.Writer) {
 
 type dumpBitmap struct {
 	bitmap []uint8
+	data   []byte
+	filter filter.IFilter
 }
 
 type dumpMetaBlock struct {
@@ -240,7 +245,8 @@ func (d *dumpMetaBlock) print(w io.Writer) {
 	buf.WriteString("meta_block: [")
 
 	buf.WriteString(fmt.Sprintf("\"%s\"", d.filterName))
-	buf.WriteString(fmt.Sprintf("\"offset\":%d, \"len\":%d", d.offset, d.length))
+	buf.WriteString(":")
+	buf.WriteString(fmt.Sprintf("{\"offset\":%d, \"length\":%d}", d.offset, d.length))
 
 	buf.WriteString("]\n\n")
 
@@ -265,6 +271,9 @@ type dumpSSTable struct {
 type statics struct {
 	dataBlockKeyCount  int
 	indexBlockKeyCount int
+
+	dataBlockKeyNotInFilter   []kv
+	dataBlockKeyInFilterCount int
 }
 
 func (f *dumpSSTable) print(w io.Writer) {
@@ -283,9 +292,13 @@ func (f *dumpSSTable) print(w io.Writer) {
 
 	f.statics.indexBlockKeyCount += len(f.indexBlock.kvPairs)
 
-	statics := fmt.Sprintf("statics: [\"datablock key_count=%d\", \"indexblock key_count=%d\"]\n",
+	statics := fmt.Sprintf("data.statics: [\"datablock key_count=%d\", \"indexblock key_count=%d\"]\n",
 		f.statics.dataBlockKeyCount, f.statics.indexBlockKeyCount)
 	_, _ = w.Write([]byte(statics))
+
+	statics = fmt.Sprintf("filter.statics: [\"keys_contains_count=%d\"]\n", f.statics.dataBlockKeyInFilterCount)
+	_, _ = w.Write([]byte(statics))
+
 }
 
 func (dump *Dump) readFooter() (*dumpFooter, error) {
@@ -360,10 +373,11 @@ func (dump *Dump) readDataBlock(bh blockHandle) *dumpDataBlock {
 	return block
 }
 
-func NewDump(r io.Reader, w io.Writer) *Dump {
+func NewDump(r io.Reader, w io.Writer, iFilter filter.IFilter) *Dump {
 	return &Dump{
-		r: r,
-		w: w,
+		r:       r,
+		w:       w,
+		iFilter: iFilter,
 	}
 }
 
@@ -427,10 +441,15 @@ func (dump *Dump) readAll() error {
 
 	// read filter
 
-	ssTable.filterBlock = dump.readFilterBlock(ssTable.metaBlock.blockHandle)
+	filterBlock := dump.readFilterBlock(ssTable.metaBlock.blockHandle)
+	ssTable.filterBlock = filterBlock
 
 	dump.data = data
 	dump.dumpSSTable = ssTable
+
+	// output whole datablock in filter block static console
+	dump.calculateFilterStatic()
+
 	return nil
 }
 
@@ -454,7 +473,7 @@ func (dump *Dump) readFilterBlock(bh blockHandle) *dumpFilter {
 	for i := 0; i < offsetNums-1; i++ {
 		s := int(binary.LittleEndian.Uint32(data[lastOffset+i*4 : lastOffset+(i+1)*4]))
 		e := int(binary.LittleEndian.Uint32(data[lastOffset+(i+1)*4 : lastOffset+(i+2)*4]))
-		bitmap := convertFilterBlockToBitmap(data[s:e])
+		bitmap := convertFilterBlockToBitmap(data[s:e], dump.iFilter)
 		bitmaps = append(bitmaps, bitmap)
 		offsets = append(offsets, s)
 	}
@@ -466,13 +485,18 @@ func (dump *Dump) readFilterBlock(bh blockHandle) *dumpFilter {
 	}
 }
 
-func convertFilterBlockToBitmap(data []byte) *dumpBitmap {
+func convertFilterBlockToBitmap(data []byte, iFilter filter.IFilter) *dumpBitmap {
 
 	bitmap := make([]uint8, 0, len(data)*8)
 	for _, b := range data {
 		bitmap = append(bitmap, byte2Bits(b)[:]...)
 	}
-	return &dumpBitmap{bitmap: bitmap}
+
+	return &dumpBitmap{
+		bitmap: bitmap,
+		data:   data,
+		filter: iFilter,
+	}
 }
 
 func byte2Bits(b byte) []uint8 {
@@ -486,4 +510,23 @@ func byte2Bits(b byte) []uint8 {
 		}
 	}
 	return r[:]
+}
+
+func (dump *Dump) calculateFilterStatic() {
+	dataBlocks := dump.dumpSSTable.dataBlocks
+	filterBlock := dump.dumpSSTable.filterBlock
+	for idx, dataBlock := range dataBlocks {
+		bitmap := filterBlock.dumpBitmap[idx]
+		dataBlock.foreach(func(i int, k, v []byte) {
+			ok := bitmap.filter.MayContains(k, bitmap.data)
+			if !ok {
+				dump.dumpSSTable.dataBlockKeyNotInFilter = append(dump.dumpSSTable.dataBlockKeyNotInFilter, kv{
+					k: k,
+					v: v,
+				})
+			} else {
+				dump.dumpSSTable.dataBlockKeyInFilterCount++
+			}
+		})
+	}
 }
