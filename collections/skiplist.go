@@ -33,12 +33,21 @@ type SkipList struct {
 
 func NewSkipList(seed int64, capacity int, cmp comparer.BasicComparer) *SkipList {
 	skl := &SkipList{
-		rand:          rand.New(rand.NewSource(seed)),
-		seed:          seed,
-		dummyHead:     &skipListNode{},
+		rand: rand.New(rand.NewSource(seed)),
+		seed: seed,
+		dummyHead: &skipListNode{
+			level: skipListNodeLevel{
+				next:     make([]*skipListNode, kMaxHeight),
+				maxLevel: 0,
+			},
+		},
+		BasicReleaser: &utils.BasicReleaser{},
 		kvData:        make([]byte, 0, capacity),
 		BasicComparer: cmp,
 	}
+
+	skl.Ref()
+
 	return skl
 }
 
@@ -60,7 +69,8 @@ func (skl *SkipList) Put(key, value []byte) (err error) {
 	updates := skl.updateScratch
 
 	// if key exists, just update the value
-	if updates[0] != nil && skl.Compare(updates[0].next(0).key(skl.kvData), key) == 0 {
+	if updates[0] != nil && updates[0].next(0) != nil &&
+		skl.Compare(updates[0].next(0).key(skl.kvData), key) == 0 {
 
 		replaceNode := updates[0].next(0)
 
@@ -242,11 +252,13 @@ func (skl *SkipList) Reset() {
 func (skl *SkipList) NewIterator() iterator.Iterator {
 	skl.Ref()
 	sklIter := &SkipListIter{
-		skl: skl,
+		BasicReleaser: &utils.BasicReleaser{},
+		skl:           skl,
 	}
-	skl.RegisterCleanUp(func(args ...interface{}) {
+	sklIter.RegisterCleanUp(func(args ...interface{}) {
 		skl.UnRef()
 	})
+	sklIter.Ref()
 	return sklIter
 }
 
@@ -274,7 +286,7 @@ func (sklIter *SkipListIter) Next() bool {
 		sklIter.iterErr = errors.ErrReleased
 		return false
 	}
-	if sklIter.dir == iterator.DirSOI {
+	if sklIter.dir == iterator.DirEOI {
 		return false
 	}
 	skl := sklIter.skl
@@ -370,7 +382,6 @@ type skipListNode struct {
 }
 
 func (node *skipListNode) setNext(i int8, n *skipListNode) {
-	utils.Assert(i < node.level.maxLevel)
 	next := node.level.next[i]
 	node.level.next[i] = n
 	if n != nil {
@@ -379,7 +390,6 @@ func (node *skipListNode) setNext(i int8, n *skipListNode) {
 }
 
 func (node *skipListNode) next(i int8) *skipListNode {
-	utils.Assert(i < node.level.maxLevel)
 	return node.level.next[i]
 }
 
