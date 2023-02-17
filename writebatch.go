@@ -250,7 +250,7 @@ func (wb *WriteBatch) foreach(fn func(kt keyType, key []byte, seq sequence, valu
 
 	countN, err := wb.rep.Read(wb.header[KWriteBatchSeqSize:KWriteBatchHeaderSize])
 	utils.Assert(countN == KWriteBatchCountSize)
-	count := binary.LittleEndian.Uint32(wb.header[KWriteBatchHeaderSize:KWriteBatchHeaderSize])
+	count := binary.LittleEndian.Uint32(wb.header[KWriteBatchSeqSize:KWriteBatchHeaderSize])
 
 	utils.Assert(sequence(seq) == wb.seq)
 	utils.Assert(count == wb.count)
@@ -284,6 +284,7 @@ func (wb *WriteBatch) foreach(fn func(kt keyType, key []byte, seq sequence, valu
 				goto END
 			}
 			value = utils.PoolGetBytes(int(valLen))
+			_, err = wb.rep.Read(value)
 			err = fn(keyType(kt), key, wb.seq+sequence(i), value)
 			goto END
 		} else {

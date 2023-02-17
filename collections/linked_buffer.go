@@ -121,13 +121,13 @@ func (lb *LinkBlockBuffer) Read(p []byte) (n int, err error) {
 		if lb.readPos == lb.writePos {
 			return
 		}
+		if lb.readPos == 0 && lb.readCur == nil {
+			lb.readCur = lb.head
+		}
+
 		posInBlock := lb.readPos & (blockSize - 1)
-		if posInBlock == 0 {
-			if lb.readCur == nil {
-				lb.readCur = lb.head
-			} else {
-				lb.readCur = lb.readCur.next
-			}
+		if lb.readPos > 0 && posInBlock == 0 {
+			lb.readCur = lb.readCur.next
 		}
 
 		end := blockSize
