@@ -363,7 +363,7 @@ func (c *compaction1) makeInputIterator() (iter iterator.Iterator, err error) {
 		}
 	}
 
-	iter = iterator.NewMergeIterator(iters, c.opt.InternalComparer)
+	iter = iterator.NewMergeIterator(iters, c.opt.InternalComparer, true)
 
 	return
 }

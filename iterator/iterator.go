@@ -200,27 +200,30 @@ type MergeIterator struct {
 	iterIdx int // current iter need to fill the heap
 	dir     Direction
 	cmp     comparer.Comparer
+	asc     bool
 
 	key   []byte
 	value []byte
 }
 
-func NewMergeIterator(iters []Iterator, cmp comparer.Comparer) *MergeIterator {
+func NewMergeIterator(iters []Iterator, cmp comparer.Comparer, asc bool) *MergeIterator {
 
 	mi := &MergeIterator{
-		iters: iters,
-		keys:  make([][]byte, len(iters)),
-		cmp:   cmp,
+		BasicReleaser: &utils.BasicReleaser{},
+		iters:         iters,
+		keys:          make([][]byte, len(iters)),
+		cmp:           cmp,
+		asc:           asc,
 	}
 
 	mi.heap = InitHeap(mi.minHeapLess)
-	mi.OnClose = func() {
+	mi.RegisterCleanUp(func(args ...interface{}) {
 		mi.heap.Clear()
 		for i := range iters {
 			iters[i].UnRef()
 		}
 		mi.keys = mi.keys[:0]
-	}
+	})
 	return mi
 }
 
@@ -243,8 +246,8 @@ func (mi *MergeIterator) SeekFirst() bool {
 			mi.err = iter.Valid()
 			return false
 		}
-		mi.heap.Push(i)
 		mi.keys[i] = iter.Key()
+		mi.heap.Push(i)
 	}
 
 	return mi.next()
@@ -267,8 +270,7 @@ func (mi *MergeIterator) Next() bool {
 	} else if mi.dir == DirEOI {
 		return false
 	} else {
-		mi.SeekFirst()
-		return mi.next()
+		return mi.SeekFirst()
 	}
 }
 
@@ -312,8 +314,8 @@ func (mi *MergeIterator) next() bool {
 	mi.value = iter.Value()
 
 	if iter.Next() {
-		mi.heap.Push(mi.iterIdx)
 		mi.keys[mi.iterIdx] = iter.Key()
+		mi.heap.Push(mi.iterIdx)
 	} else {
 		mi.keys[mi.iterIdx] = nil
 	}
@@ -333,6 +335,13 @@ func (mi *MergeIterator) minHeapLess(data []interface{}, i, j int) bool {
 	keyj := mi.keys[indexj]
 
 	r := mi.cmp.Compare(keyi, keyj)
+
+	if mi.asc {
+		if r < 0 {
+			return true
+		}
+		return false
+	}
 
 	if r > 0 {
 		return true
