@@ -65,7 +65,7 @@ func parseInternalKey(ikey internalKey) (ukey []byte, kt keyType, seq uint64, er
 }
 
 func buildInternalKey(dst, uKey []byte, kt keyType, sequence sequence) internalKey {
-	dst = utils.EnsureBuffer(dst, len(dst)+8)
+	dst = utils.EnsureBuffer(dst, len(uKey)+8)
 	n := copy(dst, uKey)
 	binary.LittleEndian.PutUint64(dst[n:], (uint64(sequence)<<8)|uint64(kt))
 	return dst
