@@ -29,6 +29,7 @@ func NewLinkBlockBuffer(cap int) *LinkBlockBuffer {
 
 	lb := &LinkBlockBuffer{}
 	lb.Grow(cap)
+	lb.Reset()
 	return lb
 }
 
@@ -88,12 +89,8 @@ func (lb *LinkBlockBuffer) Write(p []byte) (int, error) {
 	m := 0
 	for writeRemain > 0 {
 		posInBlock := lb.writePos & (blockSize - 1)
-		if posInBlock == 0 {
-			if lb.writeCur == nil {
-				lb.writeCur = lb.head
-			} else {
-				lb.writeCur = lb.writeCur.next
-			}
+		if lb.writePos > 0 && posInBlock == 0 {
+			lb.writeCur = lb.writeCur.next
 		}
 		n := copy(lb.writeCur.rep[posInBlock:], p[writePos:])
 		m += n
@@ -120,9 +117,6 @@ func (lb *LinkBlockBuffer) Read(p []byte) (n int, err error) {
 	for pLen > 0 {
 		if lb.readPos == lb.writePos {
 			return
-		}
-		if lb.readPos == 0 && lb.readCur == nil {
-			lb.readCur = lb.head
 		}
 
 		posInBlock := lb.readPos & (blockSize - 1)
@@ -196,9 +190,9 @@ func (lb *LinkBlockBuffer) Update(s int, p []byte) (n int) {
 }
 
 func (lb *LinkBlockBuffer) Reset() {
-	lb.readCur = nil
+	lb.readCur = lb.head
 	lb.readPos = 0
-	lb.writeCur = nil
+	lb.writeCur = lb.head
 	lb.writePos = 0
 }
 
