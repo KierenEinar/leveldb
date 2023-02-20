@@ -134,7 +134,7 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin internalKey, imax internal
 
 	if overlapped {
 		i := 0
-		for ; i < len(tFiles); i++ {
+		for i < len(tFiles) {
 			if tFiles[i].overlapped1(imin, imax) {
 				tMinR := bytes.Compare(tFiles[i].iMin.userKey(), umin)
 				tMaxR := bytes.Compare(tFiles[i].iMax.userKey(), umax)
@@ -142,16 +142,20 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin internalKey, imax internal
 				if tMinR >= 0 && tMaxR <= 0 {
 					*dst = append(*dst, tFiles[i])
 				} else {
-					i = 0
 					*dst = (*dst)[:0]
 					if tMinR < 0 {
+						imin = tFiles[i].iMin
 						umin = tFiles[i].iMin.userKey()
 					}
 					if tMaxR > 0 {
+						imax = tFiles[i].iMax
 						umax = tFiles[i].iMax.userKey()
 					}
+					i = 0
+					continue
 				}
 			}
+			i++
 		}
 	} else {
 
@@ -160,25 +164,27 @@ func (tFiles tFiles) getOverlapped1(dst *tFiles, imin internalKey, imax internal
 			end   int
 		)
 
+		// search the first tfile's umax gt than param umin
 		idx := sort.Search(len(tFiles), func(i int) bool {
-			return bytes.Compare(tFiles[i].iMin.userKey(), umin) <= 0
+			return bytes.Compare(tFiles[i].iMax.userKey(), umin) > 0
 		})
 
 		if idx == 0 {
 			begin = 0
-		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMax.userKey(), umin) <= 0 {
+		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx-1].iMax.userKey(), umin) == 0 {
 			begin -= 1
 		} else {
 			begin = idx
 		}
 
+		// search the first tfile's umax gt than param umax
 		idx = sort.Search(len(tFiles), func(i int) bool {
-			return bytes.Compare(tFiles[i].iMax.userKey(), umax) >= 0
+			return bytes.Compare(tFiles[i].iMax.userKey(), umax) > 0
 		})
 
 		if idx == len(tFiles) {
 			end = idx
-		} else if idx < len(tFiles) && bytes.Compare(tFiles[idx].iMin.userKey(), umax) <= 0 {
+		} else if bytes.Compare(tFiles[idx].iMin.userKey(), umax) <= 0 {
 			end = idx + 1
 		} else {
 			end = idx

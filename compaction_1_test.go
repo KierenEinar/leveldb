@@ -230,3 +230,276 @@ func Test_tFiles_getRange1(t *testing.T) {
 		})
 	}
 }
+
+func Test_tFiles_getOverlapped1(t *testing.T) {
+	type args struct {
+		dst        *tFiles
+		imin       internalKey
+		imax       internalKey
+		overlapped bool
+	}
+	tests := []struct {
+		name   string
+		tFiles tFiles
+		args   args
+		want   tFiles
+	}{
+		{
+			name: "level's 0 overlapped tfiles",
+			tFiles: tFiles{
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("er"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+			args: args{
+				dst:        &tFiles{},
+				imin:       buildInternalKey(nil, []byte("k"), keyTypeValue, 50),
+				imax:       buildInternalKey(nil, []byte("z"), keyTypeValue, 1000),
+				overlapped: true,
+			},
+			want: tFiles{
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("er"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+		},
+		{
+			name: "level 1 tfiles not ovrlapped",
+			tFiles: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("w"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+			args: args{
+				dst:        &tFiles{},
+				imin:       buildInternalKey(nil, []byte("a"), keyTypeValue, 50),
+				imax:       buildInternalKey(nil, []byte("t"), keyTypeValue, 1000),
+				overlapped: false,
+			},
+			want: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+			},
+		},
+		{
+			name: "level 1 tfiles not ovrlapped, param imin lt tfiles[0].imin, param imax lt tfiles[0].imin",
+			tFiles: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("w"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+			args: args{
+				dst:        &tFiles{},
+				imin:       buildInternalKey(nil, []byte("a"), keyTypeValue, 50),
+				imax:       buildInternalKey(nil, []byte("ab"), keyTypeValue, 1000),
+				overlapped: false,
+			},
+			want: tFiles{},
+		},
+		{
+			name: "level 1 tfiles not ovrlapped, param imin lt tfiles[0].imin, param imax gt tfiles[1].imax but lt tfiles[2].imin",
+			tFiles: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("w"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+			args: args{
+				dst:        &tFiles{},
+				imin:       buildInternalKey(nil, []byte("a"), keyTypeValue, 50),
+				imax:       buildInternalKey(nil, []byte("k"), keyTypeValue, 1000),
+				overlapped: false,
+			},
+			want: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+			},
+		},
+		{
+			name: "level 1 tfiles not ovrlapped, param imin lt tfiles[0].imin, param imax gt tfiles[1].imax but lt tfiles[2].imin",
+			tFiles: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("w"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+			args: args{
+				dst:        &tFiles{},
+				imin:       buildInternalKey(nil, []byte("a"), keyTypeValue, 50),
+				imax:       buildInternalKey(nil, []byte("tt"), keyTypeValue, 1000),
+				overlapped: false,
+			},
+			want: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+			},
+		},
+		{
+			name: "level 1 tfiles not ovrlapped, param imin lt tfiles[0].imin, param imax gt tfiles[2].imin but lt tfiles[2].imax",
+			tFiles: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("w"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+			args: args{
+				dst:        &tFiles{},
+				imin:       buildInternalKey(nil, []byte("a"), keyTypeValue, 50),
+				imax:       buildInternalKey(nil, []byte("wa"), keyTypeValue, 1000),
+				overlapped: false,
+			},
+			want: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("w"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+		},
+		{
+			name: "level 1 tfiles not ovrlapped, param imin gt tfiles[2].imax, param imax gt tfiles[2].imax",
+			tFiles: tFiles{
+				{
+					fd:   1,
+					iMin: buildInternalKey(nil, []byte("abc"), keyTypeDel, 1000),
+					iMax: buildInternalKey(nil, []byte("ifg"), keyTypeValue, 2000),
+				},
+				{
+					fd:   2,
+					iMin: buildInternalKey(nil, []byte("kng"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("t"), keyTypeValue, 200),
+				},
+				{
+					fd:   3,
+					iMin: buildInternalKey(nil, []byte("w"), keyTypeValue, 50),
+					iMax: buildInternalKey(nil, []byte("zaa"), keyTypeValue, 99),
+				},
+			},
+			args: args{
+				dst:        &tFiles{},
+				imin:       buildInternalKey(nil, []byte("zb"), keyTypeValue, 50),
+				imax:       buildInternalKey(nil, []byte("zzz"), keyTypeValue, 1000),
+				overlapped: false,
+			},
+			want: tFiles{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.tFiles.getOverlapped1(tt.args.dst, tt.args.imin, tt.args.imax, tt.args.overlapped)
+			if !reflect.DeepEqual(*tt.args.dst, tt.want) {
+				t.Errorf("getOverlapped1() act = %v, want = %v", *tt.args.dst, tt.want)
+			}
+		})
+	}
+}
