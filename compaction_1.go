@@ -199,7 +199,12 @@ func (tFile tFile) overlapped1(imin internalKey, imax internalKey) bool {
 }
 
 func (tFiles tFiles) getRange1(cmp comparer.Comparer) (imin, imax internalKey) {
-	for _, tFile := range tFiles {
+	if len(tFiles) == 0 {
+		return
+	}
+
+	imin, imax = tFiles[0].iMin, tFiles[0].iMax
+	for _, tFile := range tFiles[1:] {
 		if cmp.Compare(tFile.iMin, imin) < 0 {
 			imin = tFile.iMin
 		}

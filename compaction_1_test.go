@@ -1,6 +1,11 @@
 package leveldb
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+
+	"github.com/KierenEinar/leveldb/comparer"
+)
 
 func Test_tFile_overlapped1(t *testing.T) {
 	type fields struct {
@@ -140,6 +145,87 @@ func Test_tFile_overlapped1(t *testing.T) {
 			}
 			if got := tFile.overlapped1(tt.args.imin, tt.args.imax); got != tt.want {
 				t.Errorf("overlapped1() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_tFiles_getRange1(t *testing.T) {
+	type args struct {
+		cmp comparer.Comparer
+	}
+	tests := []struct {
+		name     string
+		tFiles   tFiles
+		args     args
+		wantImin internalKey
+		wantImax internalKey
+	}{
+		{
+			name: "test a b c d not overlapped",
+			tFiles: tFiles{
+				{
+					iMin: buildInternalKey(nil, []byte("aa"), keyTypeValue, 1000),
+					iMax: buildInternalKey(nil, []byte("cc"), keyTypeValue, 1500),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("dd"), keyTypeValue, 2000),
+					iMax: buildInternalKey(nil, []byte("ff"), keyTypeValue, 2500),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("gg"), keyTypeValue, 3000),
+					iMax: buildInternalKey(nil, []byte("hh"), keyTypeValue, 3500),
+				},
+			},
+			args: args{
+				cmp: IComparer,
+			},
+			wantImin: buildInternalKey(nil, []byte("aa"), keyTypeValue, 1000),
+			wantImax: buildInternalKey(nil, []byte("hh"), keyTypeValue, 3500),
+		},
+		{
+			name: "test a b c is overlapped, d e f not overlapped",
+			tFiles: tFiles{
+				{
+					iMin: buildInternalKey(nil, []byte("aa"), keyTypeValue, 1000),
+					iMax: buildInternalKey(nil, []byte("ff"), keyTypeValue, 1500),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("dd"), keyTypeValue, 2000),
+					iMax: buildInternalKey(nil, []byte("ii"), keyTypeValue, 2500),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("ee"), keyTypeValue, 3000),
+					iMax: buildInternalKey(nil, []byte("zz"), keyTypeValue, 6500),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("aa"), keyTypeValue, 4000),
+					iMax: buildInternalKey(nil, []byte("bb"), keyTypeValue, 4500),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("jj"), keyTypeValue, 5000),
+					iMax: buildInternalKey(nil, []byte("ll"), keyTypeValue, 5500),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("oo"), keyTypeValue, 800),
+					iMax: buildInternalKey(nil, []byte("zz"), keyTypeValue, 950),
+				},
+			},
+			args: args{
+				cmp: IComparer,
+			},
+			wantImin: buildInternalKey(nil, []byte("aa"), keyTypeValue, 1000),
+			wantImax: buildInternalKey(nil, []byte("zz"), keyTypeValue, 6500),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotImin, gotImax := tt.tFiles.getRange1(tt.args.cmp)
+			if !reflect.DeepEqual(gotImin, tt.wantImin) {
+				t.Errorf("getRange1() gotImin = %s, want %s", string(gotImin), string(tt.wantImin))
+			}
+			if !reflect.DeepEqual(gotImax, tt.wantImax) {
+				t.Errorf("getRange1() gotImax = %s, want %s", string(gotImax), string(tt.wantImax))
 			}
 		})
 	}

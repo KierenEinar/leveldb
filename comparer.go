@@ -16,9 +16,9 @@ func (ic *iComparer) Compare(a, b []byte) int {
 	}
 	m, n := ia.seq(), ib.seq()
 	if m < n {
-		return 1
+		return -1
 	}
-	return -1
+	return 1
 }
 
 func (ic *iComparer) Name() []byte {
