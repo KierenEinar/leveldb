@@ -567,4 +567,6 @@ func Test_compaction1_expand(t *testing.T) {
 
 	c.expand()
 
+	t.Logf("c.inputs[0]=%v", c.inputs[0])
+	t.Logf("c.inputs[1]=%v", c.inputs[1])
 }

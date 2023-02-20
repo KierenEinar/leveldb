@@ -125,6 +125,8 @@ func (c *compaction1) expand() {
 		vs2.getOverlapped1(&c.gp, imin, imax, false)
 	}
 
+	c.inputs[0], c.inputs[1] = t0, t1
+
 }
 
 func (tFiles tFiles) getOverlapped1(dst *tFiles, imin internalKey, imax internalKey, overlapped bool) {
