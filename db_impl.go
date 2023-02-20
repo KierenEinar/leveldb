@@ -314,7 +314,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 	for {
 		if dbImpl.bgErr != nil {
 			return dbImpl.bgErr
-		} else if allowDelay && dbImpl.versionSet.levelFilesNum(0) >= options.KLevel0SlowDownTrigger {
+		} else if allowDelay && dbImpl.versionSet.levelFilesNum(0) >= dbImpl.opt.Level0SlowDownTrigger {
 			allowDelay = false
 			dbImpl.rwMutex.Unlock()
 			time.Sleep(time.Microsecond * 1000)
@@ -323,7 +323,7 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 			break
 		} else if dbImpl.imm != nil { // wait background compaction compact imm table
 			dbImpl.backgroundWorkFinishedSignal.Wait()
-		} else if dbImpl.versionSet.levelFilesNum(0) >= options.KLevel0StopWriteTrigger {
+		} else if dbImpl.versionSet.levelFilesNum(0) >= dbImpl.opt.Level0StopWriteTrigger {
 			dbImpl.backgroundWorkFinishedSignal.Wait()
 		} else {
 			journalFd := storage.Fd{
@@ -850,8 +850,17 @@ func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, e
 		opt.MaxCompactionLimitFactor = 25
 	}
 
+	if o == nil || o.Level0SlowDownTrigger == 0 || o.Level0SlowDownTrigger >= 12 {
+		opt.Level0SlowDownTrigger = 8
+	}
+
+	if o == nil || o.Level0StopWriteTrigger == 0 || o.Level0StopWriteTrigger >= 15 ||
+		o.Level0StopWriteTrigger <= o.Level0SlowDownTrigger {
+		opt.Level0SlowDownTrigger = 12
+	}
+
 	if o == nil || o.WriteBufferSize == 0 {
-		opt.WriteBufferSize = options.KMemTableWriteBufferSize // 4m
+		opt.WriteBufferSize = 1 << 22 // 4m
 	}
 
 	if o == nil || o.MaxManifestFileSize == 0 {

@@ -503,3 +503,7 @@ func Test_tFiles_getOverlapped1(t *testing.T) {
 		})
 	}
 }
+
+func Test_compaction1_expand(t *testing.T) {
+
+}

@@ -33,7 +33,7 @@ type compaction1 struct {
 	tableCache     *TableCache
 	edit           VersionEdit
 
-	baseLevelI [options.KLevelNum]int
+	baseLevelI [KLevelNum]int
 
 	err error
 }
@@ -120,7 +120,7 @@ func (c *compaction1) expand() {
 
 	// calculate the grand parent's
 	gpLevel := c.sourceLevel + 2
-	if gpLevel < options.KLevelNum {
+	if gpLevel < KLevelNum {
 		vs2 := c.levels[gpLevel]
 		vs2.getOverlapped1(&c.gp, imin, imax, false)
 	}

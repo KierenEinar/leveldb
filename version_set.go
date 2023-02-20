@@ -22,7 +22,7 @@ import (
 type VersionSet struct {
 	versions    *list.List
 	current     *Version
-	compactPtrs [options.KLevelNum]*compactPtr
+	compactPtrs [KLevelNum]*compactPtr
 	cmp         comparer.Comparer
 
 	comparerName   []byte
@@ -41,7 +41,7 @@ type Version struct {
 	element *list.Element
 	vSet    *VersionSet
 	*utils.BasicReleaser
-	levels [options.KLevelNum]tFiles
+	levels [KLevelNum]tFiles
 
 	closed bool
 
@@ -63,8 +63,8 @@ func newVersion(vSet *VersionSet) *Version {
 type vBuilder struct {
 	vSet     *VersionSet
 	base     *Version
-	inserted [options.KLevelNum]*tFileSortedSet
-	deleted  [options.KLevelNum]*uintSortedSet
+	inserted [KLevelNum]*tFileSortedSet
+	deleted  [KLevelNum]*uintSortedSet
 }
 
 func newBuilder(vSet *VersionSet, base *Version) *vBuilder {
@@ -72,10 +72,10 @@ func newBuilder(vSet *VersionSet, base *Version) *vBuilder {
 		vSet: vSet,
 		base: base,
 	}
-	for i := 0; i < options.KLevelNum; i++ {
+	for i := 0; i < KLevelNum; i++ {
 		builder.inserted[i] = newTFileSortedSet(vSet.opt.InternalComparer)
 	}
-	for i := 0; i < options.KLevelNum; i++ {
+	for i := 0; i < KLevelNum; i++ {
 		builder.deleted[i] = newUintSortedSet()
 	}
 	return builder
@@ -91,7 +91,7 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 	}
 	for _, addTable := range edit.addedTables {
 		level, number := addTable.level, addTable.number
-		utils.Assert(level <= options.KLevelNum)
+		utils.Assert(level <= KLevelNum)
 		builder.deleted[level].remove(number)
 		tFile := &tFile{
 			fd:   int(addTable.number),
@@ -111,7 +111,7 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 
 func (builder *vBuilder) saveTo(v *Version) {
 
-	for level := 0; level < options.KLevelNum; level++ {
+	for level := 0; level < KLevelNum; level++ {
 		baseFile := builder.base.levels[level]
 		beginPos := 0
 		iter := builder.inserted[level].NewIterator()
@@ -499,11 +499,11 @@ func finalize(v *Version) {
 	for level := 0; level < len(v.levels)-1; level++ {
 		if level == 0 {
 			length := len(v.levels[level])
-			bestScore = float64(length) / options.KLevel0StopWriteTrigger
+			bestScore = float64(length / v.vSet.opt.Level0StopWriteTrigger)
 			bestLevel = 0
 		} else {
 			totalSize := uint64(v.levels[level].size())
-			score := float64(totalSize / options.MaxBytesForLevel(level))
+			score := float64(totalSize / MaxBytesForLevel(level))
 			if score > bestScore {
 				bestScore = score
 				bestLevel = level

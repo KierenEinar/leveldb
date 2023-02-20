@@ -13,6 +13,19 @@ type DB interface {
 	Close() error
 }
 
+const KLevelNum = 7
+
+const KLevel1SizeThreshold = 10 * (1 << 20) //10m
+
+func MaxBytesForLevel(level int) uint64 {
+	result := uint64(KLevel1SizeThreshold)
+	for level > 1 {
+		result *= 10
+		level--
+	}
+	return result
+}
+
 func Open(dbpath string, option *options.Options) (db DB, err error) {
 	opt, err := sanitizeOptions(dbpath, option)
 	if err != nil {

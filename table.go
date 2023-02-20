@@ -53,7 +53,7 @@ func (sf tFiles) size() (size int) {
 	return
 }
 
-type Levels [options.KLevelNum]tFiles
+type Levels [KLevelNum]tFiles
 
 func (s tFile) isOverlapped(umin []byte, umax []byte) bool {
 	smin, smax := s.iMin.userKey(), s.iMax.userKey()
