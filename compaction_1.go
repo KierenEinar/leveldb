@@ -27,7 +27,6 @@ type compaction1 struct {
 
 	opt            *options.Options
 	outputs        map[uint64]struct{}
-	minSeq         sequence
 	tWriter        *tWriter
 	tableOperation *tableOperation
 	tableCache     *TableCache
@@ -233,11 +232,10 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 		}
 	}()
 
-	if dbImpl.snapshots.Len() == 0 {
-		c.minSeq = dbImpl.seqNum
-	} else {
-		c.minSeq = dbImpl.snapshots.Front().Value.(*snapshotElement).seq
-	}
+	snap := dbImpl.acquireSnapshot()
+	defer dbImpl.releaseSnapshot(snap)
+
+	minSeq := snap.seq
 
 	dbImpl.rwMutex.Unlock()
 
@@ -284,11 +282,11 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 				lastSeq = sequence(kMaxSequenceNum)
 				lastIKey = inputKey
 			}
-			if lastSeq > c.minSeq {
+			if lastSeq > minSeq {
 				drop = false
 				if kt == keyTypeValue {
 
-				} else if kt == keyTypeDel && sequence(seq) < c.minSeq && c.isBaseLevelForKey(inputKey) {
+				} else if kt == keyTypeDel && sequence(seq) < minSeq && c.isBaseLevelForKey(inputKey) {
 					drop = true
 				}
 			} else {
