@@ -1,6 +1,7 @@
 package leveldb
 
 import (
+	"os"
 	"reflect"
 	"testing"
 
@@ -505,5 +506,65 @@ func Test_tFiles_getOverlapped1(t *testing.T) {
 }
 
 func Test_compaction1_expand(t *testing.T) {
+
+	opt, _ := sanitizeOptions(os.TempDir(), nil)
+
+	c := compaction1{
+		inputs: [2]tFiles{
+			// level'0, will output [fff, mmmm]
+			{
+				{
+					iMin: buildInternalKey(nil, []byte("hhh"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 200),
+				},
+			},
+			// level'1, will output [fffa, ooo]
+			{},
+		},
+		levels: Levels{
+			// level 0
+			{
+				{
+					iMin: buildInternalKey(nil, []byte("hhh"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 200),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 700),
+					iMax: buildInternalKey(nil, []byte("mmmm"), keyTypeValue, 800),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("a"), keyTypeValue, 500),
+					iMax: buildInternalKey(nil, []byte("b"), keyTypeValue, 600),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("fff"), keyTypeValue, 300),
+					iMax: buildInternalKey(nil, []byte("jjj"), keyTypeValue, 400),
+				},
+			},
+			// level 1
+			{
+				{
+					iMin: buildInternalKey(nil, []byte("aaa"), keyTypeValue, 100),
+					iMax: buildInternalKey(nil, []byte("ff"), keyTypeValue, 200),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("fffa"), keyTypeValue, 700),
+					iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 800),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("mmma"), keyTypeValue, 500),
+					iMax: buildInternalKey(nil, []byte("ooo"), keyTypeValue, 600),
+				},
+				{
+					iMin: buildInternalKey(nil, []byte("y"), keyTypeValue, 500),
+					iMax: buildInternalKey(nil, []byte("z"), keyTypeValue, 600),
+				},
+			},
+		},
+		sourceLevel: 0,
+		opt:         opt,
+	}
+
+	c.expand()
 
 }
