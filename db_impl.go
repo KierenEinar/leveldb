@@ -881,12 +881,8 @@ func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, e
 func newDBImpl(opt *options.Options) *DBImpl {
 
 	db := &DBImpl{
-		rwMutex: sync.RWMutex{},
-		versionSet: &VersionSet{
-			versions:    list.New(),
-			compactPtrs: [7]*compactPtr{},
-			opt:         opt,
-		},
+		rwMutex:        sync.RWMutex{},
+		versionSet:     newVersionSet(opt),
 		closed:         make(chan struct{}),
 		scratchBatch:   NewWriteBatch(),
 		writers:        list.New(),
@@ -896,10 +892,6 @@ func newDBImpl(opt *options.Options) *DBImpl {
 		pendingOutputs: make(map[uint64]struct{}),
 		memPool:        make(chan *MemDB, 1),
 	}
-	tableCache := NewTableCache(opt)
-	db.versionSet.tableCache = tableCache
-	db.versionSet.blockCache = opt.BlockCache
-	db.versionSet.tableOperation = newTableOperation(opt, tableCache)
 	db.backgroundWorkFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.writersFinishedSignal = sync.NewCond(&db.rwMutex)
 	db.scheduler = NewSchedule(db.closed)

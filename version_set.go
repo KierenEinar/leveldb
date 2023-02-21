@@ -23,9 +23,7 @@ type VersionSet struct {
 	versions    *list.List
 	current     *Version
 	compactPtrs [KLevelNum]*compactPtr
-	cmp         comparer.Comparer
 
-	comparerName   []byte
 	nextFileNum    uint64
 	stJournalNum   uint64
 	stSeqNum       sequence // current memtable start seq num
@@ -35,6 +33,20 @@ type VersionSet struct {
 	tableCache     *TableCache
 	blockCache     cache.Cache
 	opt            *options.Options
+}
+
+func newVersionSet(opt *options.Options) *VersionSet {
+	tableCache := NewTableCache(opt)
+	vSet := &VersionSet{
+		versions:       list.New(),
+		current:        nil,
+		compactPtrs:    [7]*compactPtr{},
+		tableCache:     tableCache,
+		tableOperation: newTableOperation(opt, tableCache),
+		blockCache:     opt.BlockCache,
+		opt:            opt,
+	}
+	return vSet
 }
 
 type Version struct {
@@ -100,7 +112,7 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 			size: addTable.size,
 		}
 
-		allowSeeks := addTable.size / 1 << 14
+		allowSeeks := addTable.size / (1 << 14)
 		if allowSeeks < 100 {
 			allowSeeks = 100
 		}
@@ -110,9 +122,11 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 }
 
 func (builder *vBuilder) saveTo(v *Version) {
-
 	for level := 0; level < KLevelNum; level++ {
-		baseFile := builder.base.levels[level]
+		baseFile := tFiles{}
+		if builder.base != nil {
+			baseFile = builder.base.levels[level]
+		}
 		beginPos := 0
 		iter := builder.inserted[level].NewIterator()
 		v.levels[level] = make(tFiles, 0, len(baseFile)+builder.inserted[level].size) // reverse pre alloc capacity
@@ -149,7 +163,7 @@ func upperBound(s tFiles, level int, tFile *tFile, cmp comparer.BasicComparer) i
 
 func (builder *vBuilder) maybeAddFile(v *Version, file *tFile, level int) {
 
-	if builder.deleted[level].contains(file.fd) {
+	if builder.deleted[level].contains(uint64(file.fd)) {
 		return
 	}
 
@@ -273,12 +287,12 @@ func (tc *tFileComparer) Name() []byte {
 }
 
 func encodeTFileToBinary(item interface{}) (bool, []byte) {
-	tFile, ok := item.(tFile)
+	tFile, ok := item.(*tFile)
 	if !ok {
 		return false, nil
 	}
-	key := encodeTFile(&tFile)
-	return true, key
+
+	return true, encodeTFile(tFile)
 }
 
 func decodeBinaryToTFile(b []byte) *tFile {

@@ -489,6 +489,10 @@ func (tree *BTree) depth() int {
 func (iter *BTreeIter) SeekFirst() bool {
 	node := iter.root
 
+	if node == nil {
+		return false
+	}
+
 	// push into stack
 	for {
 		iter.stack = append(iter.stack, &bTreeCursor{

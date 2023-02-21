@@ -29,7 +29,7 @@ type tFileHeader struct {
 }
 
 func encodeTFile(t *tFile) []byte {
-	l := unsafe.Sizeof(t)
+	l := unsafe.Sizeof(*t)
 	header := &tFileHeader{
 		addr: uintptr(unsafe.Pointer(t)),
 		len:  int(l),
