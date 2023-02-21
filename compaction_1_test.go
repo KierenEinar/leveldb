@@ -509,64 +509,393 @@ func Test_compaction1_expand(t *testing.T) {
 
 	opt, _ := sanitizeOptions(os.TempDir(), nil)
 
-	c := compaction1{
-		inputs: [2]tFiles{
-			// level'0, will output [fff, mmmm]
-			{
-				{
-					iMin: buildInternalKey(nil, []byte("hhh"), keyTypeValue, 100),
-					iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 200),
-				},
-			},
-			// level'1, will output [fffa, ooo]
-			{},
-		},
-		levels: Levels{
-			// level 0
-			{
-				{
-					iMin: buildInternalKey(nil, []byte("hhh"), keyTypeValue, 100),
-					iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 200),
-				},
-				{
-					iMin: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 700),
-					iMax: buildInternalKey(nil, []byte("mmmm"), keyTypeValue, 800),
-				},
-				{
-					iMin: buildInternalKey(nil, []byte("a"), keyTypeValue, 500),
-					iMax: buildInternalKey(nil, []byte("b"), keyTypeValue, 600),
-				},
-				{
-					iMin: buildInternalKey(nil, []byte("fff"), keyTypeValue, 300),
-					iMax: buildInternalKey(nil, []byte("jjj"), keyTypeValue, 400),
-				},
-			},
-			// level 1
-			{
-				{
-					iMin: buildInternalKey(nil, []byte("aaa"), keyTypeValue, 100),
-					iMax: buildInternalKey(nil, []byte("ff"), keyTypeValue, 200),
-				},
-				{
-					iMin: buildInternalKey(nil, []byte("fffa"), keyTypeValue, 700),
-					iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 800),
-				},
-				{
-					iMin: buildInternalKey(nil, []byte("mmma"), keyTypeValue, 500),
-					iMax: buildInternalKey(nil, []byte("ooo"), keyTypeValue, 600),
-				},
-				{
-					iMin: buildInternalKey(nil, []byte("y"), keyTypeValue, 500),
-					iMax: buildInternalKey(nil, []byte("z"), keyTypeValue, 600),
-				},
-			},
-		},
-		sourceLevel: 0,
-		opt:         opt,
-	}
+	t.Run("level'1 won't cause level'0 expand ", func(t *testing.T) {
 
-	c.expand()
+		c := compaction1{
+			inputs: [2]tFiles{
+				// level'0, will output [fff, mmmm]
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("hhh"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 200),
+					},
+				},
+				// level'1, will output [fffa, ooo]
+				{},
+			},
+			levels: Levels{
+				// level 0
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("hhh"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 200),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("mmmm"), keyTypeValue, 800),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("a"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("b"), keyTypeValue, 600),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("fff"), keyTypeValue, 300),
+						iMax: buildInternalKey(nil, []byte("jjj"), keyTypeValue, 400),
+					},
+				},
+				// level 1
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("aaa"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("ff"), keyTypeValue, 200),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("fffa"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 800),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("mmma"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("ooo"), keyTypeValue, 600),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("y"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("z"), keyTypeValue, 600),
+					},
+				},
+			},
+			sourceLevel: 0,
+			opt:         opt,
+		}
 
-	t.Logf("c.inputs[0]=%v", c.inputs[0])
-	t.Logf("c.inputs[1]=%v", c.inputs[1])
+		c.expand()
+
+		wants0 := tFiles{
+			{
+				iMin: buildInternalKey(nil, []byte("hhh"), keyTypeValue, 100),
+				iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 200),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("mmmm"), keyTypeValue, 800),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("fff"), keyTypeValue, 300),
+				iMax: buildInternalKey(nil, []byte("jjj"), keyTypeValue, 400),
+			},
+		}
+
+		wants1 := tFiles{
+			{
+				iMin: buildInternalKey(nil, []byte("fffa"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("mmm"), keyTypeValue, 800),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("mmma"), keyTypeValue, 500),
+				iMax: buildInternalKey(nil, []byte("ooo"), keyTypeValue, 600),
+			},
+		}
+
+		if !reflect.DeepEqual(c.inputs[0], wants0) {
+			t.Errorf("intputs[0] act = %v, want = %v", c.inputs[0], wants0)
+		}
+
+		if !reflect.DeepEqual(c.inputs[1], wants1) {
+			t.Errorf("intputs[1] act = %v, want = %v", c.inputs[1], wants1)
+		}
+	})
+
+	t.Run("level'1 will cause level'0 expand ", func(t *testing.T) {
+
+		c := compaction1{
+			inputs: [2]tFiles{
+				// level'0, will output [fff, mmmm]
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("77"), keyTypeValue, 200),
+					},
+				},
+				// level'1, will output [fffa, ooo]
+				{},
+			},
+			levels: Levels{
+				// level 0
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("77"), keyTypeValue, 200),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("11"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("88"), keyTypeValue, 800),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("88"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("881"), keyTypeValue, 600),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("9"), keyTypeValue, 300),
+						iMax: buildInternalKey(nil, []byte("9a"), keyTypeValue, 400),
+					},
+				},
+				// level 1
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("55"), keyTypeValue, 200),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("555"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("666"), keyTypeValue, 800),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("88"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("999"), keyTypeValue, 600),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("y"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("z"), keyTypeValue, 600),
+					},
+				},
+			},
+			sourceLevel: 0,
+			opt:         opt,
+		}
+
+		c.expand()
+
+		wants0 := tFiles{
+			{
+				iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+				iMax: buildInternalKey(nil, []byte("77"), keyTypeValue, 200),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("11"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("88"), keyTypeValue, 800),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("88"), keyTypeValue, 500),
+				iMax: buildInternalKey(nil, []byte("881"), keyTypeValue, 600),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("9"), keyTypeValue, 300),
+				iMax: buildInternalKey(nil, []byte("9a"), keyTypeValue, 400),
+			},
+		}
+
+		wants1 := tFiles{
+			{
+				iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+				iMax: buildInternalKey(nil, []byte("55"), keyTypeValue, 200),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("555"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("666"), keyTypeValue, 800),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("88"), keyTypeValue, 500),
+				iMax: buildInternalKey(nil, []byte("999"), keyTypeValue, 600),
+			},
+		}
+
+		if !reflect.DeepEqual(c.inputs[0], wants0) {
+			t.Errorf("intputs[0] act = %v, want = %v", c.inputs[0], wants0)
+		}
+
+		if !reflect.DeepEqual(c.inputs[1], wants1) {
+			t.Errorf("intputs[1] act = %v, want = %v", c.inputs[1], wants1)
+		}
+	})
+
+	t.Run("level'1 will cause level'0 expand, but intput[1] change, so level'0 won't expand again", func(t *testing.T) {
+
+		c := compaction1{
+			inputs: [2]tFiles{
+				// level'0, will output [fff, mmmm]
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("77"), keyTypeValue, 200),
+					},
+				},
+				// level'1, will output [fffa, ooo]
+				{},
+			},
+			levels: Levels{
+				// level 0
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("77"), keyTypeValue, 200),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("11"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("88"), keyTypeValue, 800),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("88"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("8881"), keyTypeValue, 600),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("9"), keyTypeValue, 300),
+						iMax: buildInternalKey(nil, []byte("9a"), keyTypeValue, 400),
+					},
+				},
+				// level 1
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("55"), keyTypeValue, 200),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("555"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("666"), keyTypeValue, 800),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("88"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("9"), keyTypeValue, 600),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("91"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("z"), keyTypeValue, 600),
+					},
+				},
+			},
+			sourceLevel: 0,
+			opt:         opt,
+		}
+
+		c.expand()
+
+		wants0 := tFiles{
+			{
+				iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+				iMax: buildInternalKey(nil, []byte("77"), keyTypeValue, 200),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("11"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("88"), keyTypeValue, 800),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("88"), keyTypeValue, 500),
+				iMax: buildInternalKey(nil, []byte("8881"), keyTypeValue, 600),
+			},
+		}
+
+		wants1 := tFiles{
+			{
+				iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+				iMax: buildInternalKey(nil, []byte("55"), keyTypeValue, 200),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("555"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("666"), keyTypeValue, 800),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("88"), keyTypeValue, 500),
+				iMax: buildInternalKey(nil, []byte("9"), keyTypeValue, 600),
+			},
+		}
+
+		if !reflect.DeepEqual(c.inputs[0], wants0) {
+			t.Errorf("intputs[0] act = %v, want = %v", c.inputs[0], wants0)
+		}
+
+		if !reflect.DeepEqual(c.inputs[1], wants1) {
+			t.Errorf("intputs[1] act = %v, want = %v", c.inputs[1], wants1)
+		}
+	})
+
+	t.Run("input[0] from level 1, input[1] from level 2", func(t *testing.T) {
+
+		c := compaction1{
+			inputs: [2]tFiles{
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00a"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("22c"), keyTypeValue, 200),
+					},
+				},
+				// level'1, will output [fffa, ooo]
+				{},
+			},
+			levels: Levels{
+				// level 0
+				{},
+				// level 1
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00a"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("22c"), keyTypeValue, 200),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("33a"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("44a"), keyTypeValue, 800),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("55a"), keyTypeValue, 500),
+						iMax: buildInternalKey(nil, []byte("66a"), keyTypeValue, 600),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("77a"), keyTypeValue, 300),
+						iMax: buildInternalKey(nil, []byte("88a"), keyTypeValue, 400),
+					},
+				},
+				// level 2
+				{
+					{
+						iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+						iMax: buildInternalKey(nil, []byte("110"), keyTypeValue, 200),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("11"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("229"), keyTypeValue, 800),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("22b"), keyTypeValue, 700),
+						iMax: buildInternalKey(nil, []byte("550"), keyTypeValue, 800),
+					},
+				},
+			},
+			sourceLevel: 1,
+			opt:         opt,
+		}
+
+		c.expand()
+
+		wants0 := tFiles{
+			{
+				iMin: buildInternalKey(nil, []byte("00a"), keyTypeValue, 100),
+				iMax: buildInternalKey(nil, []byte("22c"), keyTypeValue, 200),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("33a"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("44a"), keyTypeValue, 800),
+			},
+		}
+
+		wants1 := tFiles{
+			{
+				iMin: buildInternalKey(nil, []byte("00"), keyTypeValue, 100),
+				iMax: buildInternalKey(nil, []byte("110"), keyTypeValue, 200),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("11"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("229"), keyTypeValue, 800),
+			},
+			{
+				iMin: buildInternalKey(nil, []byte("22b"), keyTypeValue, 700),
+				iMax: buildInternalKey(nil, []byte("550"), keyTypeValue, 800),
+			},
+		}
+
+		if !reflect.DeepEqual(c.inputs[0], wants0) {
+			t.Errorf("intputs[0] act = %v, want = %v", c.inputs[0], wants0)
+		}
+
+		if !reflect.DeepEqual(c.inputs[1], wants1) {
+			t.Errorf("intputs[1] act = %v, want = %v", c.inputs[1], wants1)
+		}
+	})
+
 }
