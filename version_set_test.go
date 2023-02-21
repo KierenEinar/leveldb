@@ -15,6 +15,7 @@ func Test_VersionBuilder(t *testing.T) {
 
 		vb := newBuilder(vSet, nil)
 
+		// add level'0 new table
 		edit := VersionEdit{
 			addedTables: []addTable{
 				{
@@ -36,6 +37,7 @@ func Test_VersionBuilder(t *testing.T) {
 			t.Fatalf("level[0][0] should eq ")
 		}
 
+		// add level'0 new table
 		edit = VersionEdit{
 			addedTables: []addTable{
 				{
@@ -56,6 +58,53 @@ func Test_VersionBuilder(t *testing.T) {
 
 		if v2.levels[0][1].fd != int(edit.addedTables[0].number) {
 			t.Fatalf("level[0][1] should eq ")
+		}
+
+		// add level'0 new table
+
+		edit = VersionEdit{
+			addedTables: []addTable{
+				{
+					level:  0,
+					size:   10,
+					number: 12,
+					imin:   buildInternalKey(nil, []byte("rews"), keyTypeValue, 100),
+					imax:   buildInternalKey(nil, []byte("uw"), keyTypeValue, 100),
+				},
+			},
+		}
+
+		v3 := &Version{}
+
+		vb = newBuilder(vSet, v2)
+		vb.apply(edit)
+		vb.saveTo(v3)
+
+		if v3.levels[0][2].fd != int(edit.addedTables[0].number) {
+			t.Fatalf("level[0][2] should eq ")
+		}
+
+		// add level'0 new table
+		edit = VersionEdit{
+			addedTables: []addTable{
+				{
+					level:  0,
+					size:   10,
+					number: 12,
+					imin:   buildInternalKey(nil, []byte("xews"), keyTypeValue, 100),
+					imax:   buildInternalKey(nil, []byte("zw"), keyTypeValue, 100),
+				},
+			},
+		}
+
+		v4 := &Version{}
+
+		vb = newBuilder(vSet, v3)
+		vb.apply(edit)
+		vb.saveTo(v4)
+
+		if v4.levels[0][3].fd != int(edit.addedTables[0].number) {
+			t.Fatalf("level[0][2] should eq ")
 		}
 
 	})

@@ -103,7 +103,7 @@ func (builder *vBuilder) apply(edit VersionEdit) {
 	}
 	for _, addTable := range edit.addedTables {
 		level, number := addTable.level, addTable.number
-		utils.Assert(level <= KLevelNum)
+		utils.Assert(level < KLevelNum)
 		builder.deleted[level].remove(number)
 		tFile := &tFile{
 			fd:   int(addTable.number),
