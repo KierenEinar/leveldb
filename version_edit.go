@@ -1,6 +1,7 @@
 package leveldb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 
@@ -30,6 +31,10 @@ type VersionEdit struct {
 	err          error
 }
 
+func (edit *VersionEdit) resetScratch() {
+	copy(edit.scratch[:], bytes.Repeat([]byte{0}, binary.MaxVarintLen64))
+}
+
 func (edit *VersionEdit) reset() {
 	edit.rec = 0
 	edit.comparerName = nil
@@ -39,6 +44,7 @@ func (edit *VersionEdit) reset() {
 	edit.compactPtrs = nil
 	edit.delTables = nil
 	edit.addedTables = nil
+	edit.resetScratch()
 	edit.err = nil
 }
 
@@ -121,6 +127,7 @@ func (edit *VersionEdit) addNewTable(level, size int, fileNumber uint64, imin, i
 }
 
 func (edit *VersionEdit) EncodeTo(dest io.Writer) {
+	defer edit.resetScratch()
 	switch {
 	case edit.hasRec(kComparerName):
 		edit.writeHeader(dest, kComparerName)
@@ -139,22 +146,22 @@ func (edit *VersionEdit) EncodeTo(dest io.Writer) {
 		edit.putUVarInt(dest, uint64(edit.lastSeq))
 		fallthrough
 	case edit.hasRec(kCompact):
-		edit.writeHeader(dest, kCompact)
 		for _, cptr := range edit.compactPtrs {
+			edit.writeHeader(dest, kCompact)
 			edit.putVarInt(dest, cptr.level)
 			edit.writeBytes(dest, cptr.ikey)
 		}
 		fallthrough
 	case edit.hasRec(kDelTable):
-		edit.writeHeader(dest, kDelTable)
 		for _, dt := range edit.delTables {
+			edit.writeHeader(dest, kDelTable)
 			edit.putVarInt(dest, dt.level)
 			edit.putUVarInt(dest, dt.number)
 		}
 		fallthrough
 	case edit.hasRec(kAddTable):
-		edit.writeHeader(dest, kAddTable)
 		for _, dt := range edit.addedTables {
+			edit.writeHeader(dest, kAddTable)
 			edit.putVarInt(dest, dt.level)
 			edit.putVarInt(dest, dt.size)
 			edit.putUVarInt(dest, dt.number)
@@ -164,6 +171,7 @@ func (edit *VersionEdit) EncodeTo(dest io.Writer) {
 	default:
 		panic("leveldb/version_edit unsupport type")
 	}
+
 }
 
 func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
@@ -175,6 +183,9 @@ func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
 		typ = edit.readHeader(src)
 
 		if edit.err != nil {
+			if edit.err == io.EOF {
+				edit.err = nil
+			}
 			return
 		}
 
@@ -185,24 +196,28 @@ func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
 				return
 			}
 			edit.comparerName = cName
+			edit.setRec(kComparerName)
 		case kNextFileNum:
 			nextFileNum := edit.readUVarInt(src)
 			if edit.err != nil {
 				return
 			}
 			edit.nextFileNum = nextFileNum
+			edit.setRec(kNextFileNum)
 		case kJournalNum:
 			logNum := edit.readUVarInt(src)
 			if edit.err != nil {
 				return
 			}
 			edit.journalNum = logNum
+			edit.setRec(kJournalNum)
 		case kSeqNum:
 			seqNum := edit.readUVarInt(src)
 			if edit.err != nil {
 				return
 			}
 			edit.lastSeq = sequence(seqNum)
+			edit.setRec(kSeqNum)
 		case kCompact:
 			level := edit.readVarInt(src)
 			ikey := edit.readBytes(src)
@@ -213,6 +228,7 @@ func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
 				level: level,
 				ikey:  ikey,
 			})
+			edit.setRec(kCompact)
 		case kDelTable:
 			level := edit.readVarInt(src)
 			fileNum := edit.readUVarInt(src)
@@ -223,6 +239,7 @@ func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
 				level:  level,
 				number: fileNum,
 			})
+			edit.setRec(kDelTable)
 		case kAddTable:
 			level := edit.readVarInt(src)
 			size := edit.readVarInt(src)
@@ -239,6 +256,7 @@ func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
 				imin:   imin,
 				imax:   imax,
 			})
+			edit.setRec(kAddTable)
 		}
 	}
 

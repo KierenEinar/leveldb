@@ -1,6 +1,7 @@
 package leveldb
 
 import (
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -35,5 +36,11 @@ func TestVersionEdit_EncodeTo(t *testing.T) {
 
 	serialEdit := &VersionEdit{}
 	serialEdit.DecodeFrom(lk)
+
+	t.Logf("edit=%v", edit)
+	t.Logf("serialEdit=%v", serialEdit)
+	if !reflect.DeepEqual(edit, serialEdit) {
+		t.Fatalf("edit should eq serialEdit")
+	}
 
 }

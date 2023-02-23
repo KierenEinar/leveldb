@@ -124,11 +124,7 @@ func (lb *LinkBlockBuffer) Read(p []byte) (n int, err error) {
 			lb.readCur = lb.readCur.next
 		}
 
-		end := blockSize
-		if lb.writePos-lb.readPos < blockSize {
-			end = lb.writePos & (blockSize - 1)
-		}
-		m := copy(p[readN:], lb.readCur.rep[posInBlock:end])
+		m := copy(p[readN:], lb.readCur.rep[posInBlock:blockSize])
 		pLen -= m
 		readN += m
 		lb.readPos += m
