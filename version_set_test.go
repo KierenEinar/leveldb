@@ -17,56 +17,68 @@ func Test_VersionBuilder(t *testing.T) {
 
 		// del level 1 [1E, 1F], [1G, 1H], [1Q, 1R]
 		// add level 1 [1EA, 1FA], [1GA, 1GH], [1GI, 1GZ], [1QA, 1QZ]
-		edit := VersionEdit{
-			delTables: []delTable{
+		edit := VersionEdit{}
+
+		delTables := make([]delTable, 0)
+		addTables := make([]addTable, 0)
+		levelDelFd := [3]uint64{2, 3, 8}
+
+		levelAddFn := func(level int) []addTable {
+			return []addTable{
 				{
-					level:  1,
-					number: 12,
+					level:  level,
+					number: uint64(level*1000 + 1),
+					imin:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"EA"), keyTypeValue, 100),
+					imax:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"FA"), keyTypeValue, 100),
 				},
 				{
-					level:  1,
-					number: 13,
+					level:  level,
+					number: uint64(level*1000 + 2),
+					imin:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"GA"), keyTypeValue, 100),
+					imax:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"GH"), keyTypeValue, 100),
 				},
 				{
-					level:  1,
-					number: 18,
-				},
-			},
-			addedTables: []addTable{
-				{
-					level:  1,
-					number: 1001,
-					imin:   buildInternalKey(nil, []byte("1EA"), keyTypeValue, 100),
-					imax:   buildInternalKey(nil, []byte("1FA"), keyTypeValue, 100),
+					level:  level,
+					number: uint64(level*1000 + 3),
+					imin:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"GI"), keyTypeValue, 100),
+					imax:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"GZ"), keyTypeValue, 100),
 				},
 				{
-					level:  1,
-					number: 1002,
-					imin:   buildInternalKey(nil, []byte("1GA"), keyTypeValue, 100),
-					imax:   buildInternalKey(nil, []byte("1GH"), keyTypeValue, 100),
+					level:  level,
+					number: uint64(level*1000 + 4),
+					imin:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"QA"), keyTypeValue, 100),
+					imax:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"QZ"), keyTypeValue, 100),
 				},
-				{
-					level:  1,
-					number: 1003,
-					imin:   buildInternalKey(nil, []byte("1GI"), keyTypeValue, 100),
-					imax:   buildInternalKey(nil, []byte("1GZ"), keyTypeValue, 100),
-				},
-				{
-					level:  1,
-					number: 1004,
-					imin:   buildInternalKey(nil, []byte("1QA"), keyTypeValue, 100),
-					imax:   buildInternalKey(nil, []byte("1QZ"), keyTypeValue, 100),
-				},
-			},
+			}
 		}
+
+		for i := 1; i < KLevelNum; i++ {
+
+			for _, fd := range levelDelFd {
+				delTables = append(delTables, delTable{
+					level:  i,
+					number: uint64(i*10) + fd,
+				})
+			}
+
+			addTables = append(addTables, levelAddFn(i)...)
+
+		}
+
+		edit.addedTables = addTables
+		edit.delTables = delTables
+
 		v := &Version{}
 		vb := newBuilder(vSet, vSet.current)
 		vb.apply(edit)
 		vb.saveTo(v)
 		vSet.current = v
-		for i := 0; i < len(vSet.current.levels[1]); i++ {
-			tfile := vSet.current.levels[1][i]
-			t.Logf("tFile==>fd[%d], imin[%s], imax[%s]", tfile.fd, tfile.iMin.userKey(), tfile.iMax.userKey())
+		for level := 0; level < len(vSet.current.levels); level++ {
+			tFiles := vSet.current.levels[level]
+			for i := 0; i < len(tFiles); i++ {
+				t.Logf("tFile==>fd[%d], imin[%s], imax[%s]",
+					tFiles[i].fd, tFiles[i].iMin.userKey(), tFiles[i].iMax.userKey())
+			}
 		}
 	})
 
