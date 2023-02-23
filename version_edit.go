@@ -105,6 +105,10 @@ func (edit *VersionEdit) addDelTable(level int, number uint64) {
 	})
 }
 
+func (edit *VersionEdit) addTableFile(level int, file *tFile) {
+	edit.addNewTable(level, file.size, uint64(file.fd), file.iMin, file.iMax)
+}
+
 func (edit *VersionEdit) addNewTable(level, size int, fileNumber uint64, imin, imax internalKey) {
 	edit.setRec(kAddTable)
 	edit.addedTables = append(edit.addedTables, addTable{

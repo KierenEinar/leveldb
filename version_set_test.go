@@ -4,16 +4,15 @@ import (
 	"os"
 	"strconv"
 	"testing"
+
+	"github.com/KierenEinar/leveldb/comparer"
 )
 
 func Test_VersionBuilder(t *testing.T) {
 
-	opt, _ := sanitizeOptions(os.TempDir(), nil)
-
 	t.Run("test add and delete table file", func(t *testing.T) {
 
-		vSet := newVersionSet(opt)
-		fatalInitVersion(t, vSet)
+		vSet := initVersion(t)
 
 		// del level 1 [1E, 1F], [1G, 1H], [1Q, 1R]
 		// add level 1 [1EA, 1FA], [1GA, 1GH], [1GI, 1GZ], [1QA, 1QZ]
@@ -84,7 +83,12 @@ func Test_VersionBuilder(t *testing.T) {
 
 }
 
-func fatalInitVersion(t *testing.T, vSet *VersionSet) {
+func initVersion(t *testing.T) *VersionSet {
+
+	opt, _ := sanitizeOptions(os.TempDir(), nil)
+	vSet := &VersionSet{
+		opt: opt,
+	}
 
 	// each level design 10 sstable file
 	var lastVer *Version
@@ -129,11 +133,135 @@ func fatalInitVersion(t *testing.T, vSet *VersionSet) {
 			vb.saveTo(v)
 			lastVer = v
 			vSet.current = v
-			if v.levels[i][j].fd != int(edit.addedTables[0].number) {
-				t.Fatalf("level[i][j] should eq ")
-			}
-
 		}
 	}
 
+	return vSet
+
+}
+
+func Test_upperBound(t *testing.T) {
+	type args struct {
+		s     tFiles
+		level int
+		tFile *tFile
+		cmp   comparer.BasicComparer
+	}
+	tests := []struct {
+		name string
+		args args
+		want int
+	}{
+		{
+			name: "test level 0, sort by fd",
+			args: args{
+				s: tFiles{
+					{
+						fd: 10,
+					},
+					{
+						fd: 8,
+					},
+					{
+						fd: 6,
+					},
+				},
+				level: 0,
+				tFile: &tFile{
+					fd: 12,
+				},
+				cmp: IComparer,
+			},
+			want: 0,
+		},
+		{
+			name: "test level 1, sort by imax",
+			args: args{
+				s: tFiles{
+					{
+						iMin: buildInternalKey(nil, []byte("A"), keyTypeSeek, 1000),
+						iMax: buildInternalKey(nil, []byte("B"), keyTypeSeek, 1000),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("E"), keyTypeSeek, 1000),
+						iMax: buildInternalKey(nil, []byte("F"), keyTypeSeek, 1000),
+					},
+					{
+						iMin: buildInternalKey(nil, []byte("H"), keyTypeSeek, 1000),
+						iMax: buildInternalKey(nil, []byte("J"), keyTypeSeek, 1000),
+					},
+				},
+				level: 1,
+				tFile: &tFile{
+					iMin: buildInternalKey(nil, []byte("E"), keyTypeSeek, 1000),
+					iMax: buildInternalKey(nil, []byte("EA"), keyTypeSeek, 1000),
+				},
+				cmp: IComparer,
+			},
+			want: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := upperBound(tt.args.s, tt.args.level, tt.args.tFile, tt.args.cmp); got != tt.want {
+				t.Errorf("upperBound() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_vBuilder_maybeAddFile(t *testing.T) {
+
+	opt, _ := sanitizeOptions(os.TempDir(), nil)
+
+	type fields struct {
+		vSet      *VersionSet
+		base      *Version
+		inserted  [KLevelNum]*tFileSortedSet
+		deleted   [KLevelNum]*uintSortedSet
+		deleteFds []uint64
+	}
+	type args struct {
+		v     *Version
+		file  *tFile
+		level int
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+	}{
+		{
+			name: "test delete and add",
+			fields: fields{
+				vSet: &VersionSet{
+					opt: opt,
+				},
+				deleted:   [7]*uintSortedSet{},
+				deleteFds: []uint64{10, 1000},
+			},
+			args: args{
+				v: &Version{},
+				file: &tFile{
+					fd: 100,
+				},
+				level: 1,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.fields.deleted[tt.args.level] = newUintSortedSet()
+			for _, v := range tt.fields.deleteFds {
+				tt.fields.deleted[tt.args.level].add(v)
+			}
+			builder := &vBuilder{
+				vSet:     tt.fields.vSet,
+				base:     tt.fields.base,
+				inserted: tt.fields.inserted,
+				deleted:  tt.fields.deleted,
+			}
+			builder.maybeAddFile(tt.args.v, tt.args.file, tt.args.level)
+		})
+	}
 }

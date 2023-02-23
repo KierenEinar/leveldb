@@ -157,6 +157,17 @@ func (lb *LinkBlockBuffer) ReadByte() (b byte, err error) {
 	return
 }
 
+func (lb *LinkBlockBuffer) Close() error {
+	lb.readCur = nil
+	lb.writeCur = nil
+	lb.readPos = 0
+	lb.writePos = 0
+	lb.tail = nil
+	lb.head = nil
+	lb.cap = 0
+	return nil
+}
+
 func (lb *LinkBlockBuffer) Update(s int, p []byte) (n int) {
 
 	pLen := len(p)

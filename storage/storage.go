@@ -25,10 +25,6 @@ type SequentialWriter interface {
 type SequentialReader interface {
 	io.Reader
 	io.Closer
-	ByteReader
-}
-
-type ByteReader interface {
 	io.ByteReader
 }
 

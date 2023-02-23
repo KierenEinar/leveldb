@@ -151,7 +151,7 @@ func upperBound(s tFiles, level int, tFile *tFile, cmp comparer.BasicComparer) i
 
 	if level == 0 {
 		idx := sort.Search(len(s), func(i int) bool {
-			return s[i].fd > tFile.fd
+			return tFile.fd > s[i].fd
 		})
 		return idx
 	}
