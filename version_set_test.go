@@ -59,13 +59,13 @@ func Test_VersionBuilder(t *testing.T) {
 				},
 			}
 		}
-
+		baseFd := 100
 		for i := 1; i < KLevelNum; i++ {
 
 			for _, fd := range levelDelFd {
 				delTables = append(delTables, delTable{
 					level:  i,
-					number: uint64(i*10) + fd,
+					number: uint64(baseFd+i*10) + fd,
 				})
 			}
 
@@ -76,7 +76,7 @@ func Test_VersionBuilder(t *testing.T) {
 		edit.addedTables = addTables
 		edit.delTables = delTables
 
-		v := &Version{}
+		v := newVersion(vSet)
 		vb := newBuilder(vSet, vSet.current)
 		vb.apply(*edit)
 		vb.saveTo(v)
@@ -334,11 +334,12 @@ func TestVersionSet_logAndApply(t *testing.T) {
 	defer mu.Unlock()
 	// delete manifest file
 	defer vSet.opt.Storage.Remove(vSet.manifestFd)
+	baseFd := 100
 	t.Run("test add level 0 file", func(t *testing.T) {
 
 		edit := newVersionEdit()
 		tfile := tFile{
-			fd:   70,
+			fd:   baseFd + 70,
 			iMin: buildInternalKey(nil, []byte("6AA"), keyTypeValue, 100),
 			iMax: buildInternalKey(nil, []byte("6DD"), keyTypeValue, 100),
 		}

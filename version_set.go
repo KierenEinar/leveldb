@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/list"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"sort"
 	"sync"
@@ -174,6 +175,10 @@ func (builder *vBuilder) maybeAddFile(v *Version, file *tFile, level int) {
 	files := v.levels[level]
 	cmp := builder.vSet.opt.InternalComparer
 	if level > 0 && len(files) > 0 {
+		if cmp.Compare(files[len(files)-1].iMax, file.iMin) >= 0 {
+			fmt.Printf("%s-%s, %s\n", files[len(files)-1].iMax.userKey(),
+				files[len(files)-1].iMin.userKey(), file.iMin.userKey())
+		}
 		utils.Assert(cmp.Compare(files[len(files)-1].iMax, file.iMin) < 0)
 	}
 
@@ -435,7 +440,9 @@ func (vSet *VersionSet) writeSnapShot(w io.Writer) error {
 	var edit VersionEdit
 
 	for _, cPtr := range vSet.compactPtrs {
-		edit.addCompactPtr(cPtr.level, cPtr.ikey)
+		if cPtr != nil {
+			edit.addCompactPtr(cPtr.level, cPtr.ikey)
+		}
 	}
 
 	version := vSet.getCurrent()
