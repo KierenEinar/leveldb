@@ -35,8 +35,8 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 	dbImpl := newDBImpl(opt)
 	dbImpl.rwMutex.Lock()
 	defer dbImpl.rwMutex.Unlock()
-	edit := VersionEdit{}
-	err = dbImpl.recover(&edit)
+	edit := newVersionEdit()
+	err = dbImpl.recover(edit)
 	if err != nil {
 		return
 	}
@@ -59,7 +59,7 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 		dbImpl.journalFd = journalFd
 		dbImpl.journalWriter = wal.NewJournalWriter(sequentialWriter, opt.NoWriteSync)
 		edit.setLogNum(dbImpl.journalFd.Num)
-		err = dbImpl.versionSet.logAndApply(&edit, &dbImpl.rwMutex)
+		err = dbImpl.versionSet.logAndApply(edit, &dbImpl.rwMutex)
 		if err != nil {
 			return
 		}

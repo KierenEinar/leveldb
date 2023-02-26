@@ -506,9 +506,10 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	}
 
 	var (
-		edit    VersionEdit
-		version Version
+		edit *VersionEdit
 	)
+
+	edit = newVersionEdit()
 
 	vBuilder := newBuilder(vSet, newVersion(vSet))
 	journalReader := wal.NewJournalReader(reader, !vSet.opt.NoDropWholeBlockOnParseChunkErr)
@@ -527,7 +528,7 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 		edit.DecodeFrom(chunkReader)
 
 		if edit.err == io.EOF {
-			return
+			continue
 		}
 
 		if edit.err != nil {
@@ -535,7 +536,7 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 			return
 		}
 
-		vBuilder.apply(edit)
+		vBuilder.apply(*edit)
 
 		if edit.hasRec(kComparerName) {
 			hasComparerName = true
@@ -582,18 +583,12 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 		err = errors.NewErrCorruption("missing last seq num")
 		return
 	}
+	version := newVersion(vSet)
+	vBuilder.saveTo(version)
+	finalize(version)
+	vSet.appendVersion(version)
 
-	vSet.markFileUsed(logFileNum)
-	vSet.markFileUsed(nextFileNum)
-
-	vBuilder.saveTo(&version)
-	finalize(&version)
-	vSet.appendVersion(&version)
-	vSet.manifestFd = storage.Fd{
-		FileType: storage.KDescriptorFile,
-		Num:      nextFileNum,
-	}
-	vSet.nextFileNum = nextFileNum + 1
+	vSet.nextFileNum = nextFileNum
 	vSet.stSeqNum = seqNum
 	vSet.stJournalNum = logFileNum
 	return
@@ -885,6 +880,6 @@ func (vSet *VersionSet) openNewManifestIfNeed() (err error) {
 
 	vSet.manifestSeqWriter = writer
 	vSet.manifestWriter = manifestWriter
-
+	vSet.manifestFd = manifestFd
 	return
 }

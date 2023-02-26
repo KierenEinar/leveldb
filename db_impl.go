@@ -475,7 +475,7 @@ func (dbImpl *DBImpl) backgroundCompaction() {
 		return
 	} else if len(c.inputs[0]) == 1 && len(c.inputs[1]) == 0 && c.gp.size() <= c.gpOverlappedLimit {
 
-		edit := &VersionEdit{}
+		edit := newVersionEdit()
 		addTable := c.inputs[0][0]
 		edit.addNewTable(c.sourceLevel+1, addTable.size, uint64(addTable.fd), addTable.iMin, addTable.iMax)
 		err := dbImpl.versionSet.logAndApply(edit, &dbImpl.rwMutex)
@@ -509,7 +509,7 @@ func (dbImpl *DBImpl) compactMemTable() {
 		}
 	}()
 
-	edit := &VersionEdit{}
+	edit := newVersionEdit()
 	err = dbImpl.writeLevel0Table(dbImpl.imm, edit)
 	if err == nil {
 		if atomic.LoadUint32(&dbImpl.shuttingDown) == 1 {
@@ -633,17 +633,20 @@ func (dbImpl *DBImpl) recover(edit *VersionEdit) error {
 		}
 	}
 
+	dbImpl.versionSet.manifestFd = storage.Fd{
+		FileType: storage.KDescriptorFile,
+		Num:      dbImpl.versionSet.allocFileNum(),
+	}
+
 	return nil
 }
 
 func (dbImpl *DBImpl) newDb() (err error) {
 	dbImpl.seqNum = 0
-
-	newDb := &VersionEdit{
-		comparerName: dbImpl.opt.InternalComparer.Name(),
-		nextFileNum:  2,
-		lastSeq:      0,
-	}
+	newDb := newVersionEdit()
+	newDb.comparerName = dbImpl.opt.InternalComparer.Name()
+	newDb.nextFileNum = 2
+	newDb.lastSeq = 0
 
 	manifestFd := storage.Fd{
 		FileType: storage.KDescriptorFile,
@@ -857,7 +860,7 @@ func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, e
 
 	if o == nil || o.Level0StopWriteTrigger == 0 || o.Level0StopWriteTrigger >= 15 ||
 		o.Level0StopWriteTrigger <= o.Level0SlowDownTrigger {
-		opt.Level0SlowDownTrigger = 12
+		opt.Level0StopWriteTrigger = 12
 	}
 
 	if o == nil || o.WriteBufferSize == 0 {

@@ -276,17 +276,11 @@ func (jr *JournalReader) Close() error {
 
 func (chunk *chunkReader) ReadByte() (b byte, err error) {
 
-	jr := chunk.jr
-	b, err = jr.scratch.ReadByte()
-	if err == io.EOF && !chunk.eof {
-		p := make([]byte, 1)
-		_, err = chunk.Read(p)
-		if err != nil {
-			return
-		}
-		b = p[0]
+	tmp := make([]byte, 1)
+	n, err := chunk.Read(tmp)
+	if n == 1 {
+		return tmp[0], nil
 	}
-
 	return
 }
 

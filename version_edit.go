@@ -1,6 +1,7 @@
 package leveldb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 
@@ -28,6 +29,13 @@ type VersionEdit struct {
 	delTables    []delTable
 	addedTables  []addTable
 	err          error
+	buffer       *bytes.Buffer
+}
+
+func newVersionEdit() *VersionEdit {
+	return &VersionEdit{
+		buffer: bytes.NewBuffer(nil),
+	}
 }
 
 func (edit *VersionEdit) resetScratch() {
@@ -46,6 +54,7 @@ func (edit *VersionEdit) reset() {
 	edit.delTables = nil
 	edit.addedTables = nil
 	edit.resetScratch()
+	edit.buffer.Reset()
 	edit.err = nil
 }
 
@@ -131,47 +140,49 @@ func (edit *VersionEdit) EncodeTo(dest io.Writer) {
 	defer edit.resetScratch()
 	switch {
 	case edit.hasRec(kComparerName):
-		edit.writeHeader(dest, kComparerName)
-		edit.writeBytes(dest, edit.comparerName)
+		edit.writeHeader(kComparerName)
+		edit.writeBytes(edit.comparerName)
 		fallthrough
 	case edit.hasRec(kJournalNum):
-		edit.writeHeader(dest, kJournalNum)
-		edit.putUVarInt(dest, edit.journalNum)
+		edit.writeHeader(kJournalNum)
+		edit.putUVarInt(edit.journalNum)
 		fallthrough
 	case edit.hasRec(kNextFileNum):
-		edit.writeHeader(dest, kNextFileNum)
-		edit.putUVarInt(dest, edit.nextFileNum)
+		edit.writeHeader(kNextFileNum)
+		edit.putUVarInt(edit.nextFileNum)
 		fallthrough
 	case edit.hasRec(kSeqNum):
-		edit.writeHeader(dest, kSeqNum)
-		edit.putUVarInt(dest, uint64(edit.lastSeq))
+		edit.writeHeader(kSeqNum)
+		edit.putUVarInt(uint64(edit.lastSeq))
 		fallthrough
 	case edit.hasRec(kCompact):
 		for _, cptr := range edit.compactPtrs {
-			edit.writeHeader(dest, kCompact)
-			edit.putVarInt(dest, cptr.level)
-			edit.writeBytes(dest, cptr.ikey)
+			edit.writeHeader(kCompact)
+			edit.putVarInt(cptr.level)
+			edit.writeBytes(cptr.ikey)
 		}
 		fallthrough
 	case edit.hasRec(kDelTable):
 		for _, dt := range edit.delTables {
-			edit.writeHeader(dest, kDelTable)
-			edit.putVarInt(dest, dt.level)
-			edit.putUVarInt(dest, dt.number)
+			edit.writeHeader(kDelTable)
+			edit.putVarInt(dt.level)
+			edit.putUVarInt(dt.number)
 		}
 		fallthrough
 	case edit.hasRec(kAddTable):
 		for _, dt := range edit.addedTables {
-			edit.writeHeader(dest, kAddTable)
-			edit.putVarInt(dest, dt.level)
-			edit.putVarInt(dest, dt.size)
-			edit.putUVarInt(dest, dt.number)
-			edit.writeBytes(dest, dt.imin)
-			edit.writeBytes(dest, dt.imax)
+			edit.writeHeader(kAddTable)
+			edit.putVarInt(dt.level)
+			edit.putVarInt(dt.size)
+			edit.putUVarInt(dt.number)
+			edit.writeBytes(dt.imin)
+			edit.writeBytes(dt.imax)
 		}
 	default:
 		panic("leveldb/version_edit unsupport type")
 	}
+
+	_, edit.err = edit.buffer.WriteTo(dest)
 
 }
 
@@ -267,25 +278,25 @@ func (edit *VersionEdit) readHeader(src io.ByteReader) int {
 	return edit.readVarInt(src)
 }
 
-func (edit *VersionEdit) writeHeader(w io.Writer, typ int) {
-	edit.putVarInt(w, typ)
+func (edit *VersionEdit) writeHeader(typ int) {
+	edit.putVarInt(typ)
 }
 
-func (edit *VersionEdit) writeBytes(w io.Writer, value []byte) {
+func (edit *VersionEdit) writeBytes(value []byte) {
 	size := len(value)
-	edit.putVarInt(w, size)
-	_, edit.err = w.Write(value)
+	edit.putVarInt(size)
+	edit.buffer.Write(value)
 }
 
-func (edit *VersionEdit) putVarInt(w io.Writer, value int) {
+func (edit *VersionEdit) putVarInt(value int) {
 	x := binary.PutVarint(edit.scratch[:], int64(value))
-	_, edit.err = w.Write(edit.scratch[:x])
+	_, edit.err = edit.buffer.Write(edit.scratch[:x])
 	return
 }
 
-func (edit *VersionEdit) putUVarInt(w io.Writer, value uint64) {
+func (edit *VersionEdit) putUVarInt(value uint64) {
 	x := binary.PutUvarint(edit.scratch[:], value)
-	_, edit.err = w.Write(edit.scratch[:x])
+	_, edit.err = edit.buffer.Write(edit.scratch[:x])
 	return
 }
 

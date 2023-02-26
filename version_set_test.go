@@ -25,7 +25,7 @@ func Test_VersionBuilder(t *testing.T) {
 
 		// del level 1 [1E, 1F], [1G, 1H], [1Q, 1R]
 		// add level 1 [1EA, 1FA], [1GA, 1GH], [1GI, 1GZ], [1QA, 1QZ]
-		edit := VersionEdit{}
+		edit := newVersionEdit()
 
 		delTables := make([]delTable, 0)
 		addTables := make([]addTable, 0)
@@ -78,7 +78,7 @@ func Test_VersionBuilder(t *testing.T) {
 
 		v := &Version{}
 		vb := newBuilder(vSet, vSet.current)
-		vb.apply(edit)
+		vb.apply(*edit)
 		vb.saveTo(v)
 		vSet.current = v
 		for level := 0; level < len(vSet.current.levels); level++ {
@@ -92,7 +92,7 @@ func Test_VersionBuilder(t *testing.T) {
 
 }
 
-func initVersionEdit(t *testing.T) *VersionEdit {
+func initVersionEdit(t *testing.T, opt *options.Options) *VersionEdit {
 
 	//opt, _ := sanitizeOptions(os.TempDir(), nil)
 	//vSet := newVersionSet(opt)
@@ -110,7 +110,7 @@ func initVersionEdit(t *testing.T) *VersionEdit {
 	// each level design 10 sstable file
 	baseTableFd := 100
 
-	edit := &VersionEdit{}
+	edit := newVersionEdit()
 
 	for i := 0; i < KLevelNum; i++ {
 		c := rune(65)
@@ -153,7 +153,7 @@ func initVersionEdit(t *testing.T) *VersionEdit {
 	edit.setLastSeq(lastTable.imax.seq())
 	edit.setLogNum(99)
 	edit.setNextFile(lastTable.number + 1)
-	edit.setCompareName([]byte("comparer.leveldb.builtin.test"))
+	edit.setCompareName(opt.InternalComparer.Name())
 
 	return edit
 
@@ -171,7 +171,7 @@ func initOpt(t *testing.T) *options.Options {
 
 func initManifest(t *testing.T, opt *options.Options) storage.Fd {
 
-	edit := initVersionEdit(t)
+	edit := initVersionEdit(t, opt)
 
 	fd := storage.Fd{
 		FileType: storage.KDescriptorFile,
@@ -336,7 +336,7 @@ func TestVersionSet_logAndApply(t *testing.T) {
 	defer vSet.opt.Storage.Remove(vSet.manifestFd)
 	t.Run("test add level 0 file", func(t *testing.T) {
 
-		edit := &VersionEdit{}
+		edit := newVersionEdit()
 		tfile := tFile{
 			fd:   70,
 			iMin: buildInternalKey(nil, []byte("6AA"), keyTypeValue, 100),

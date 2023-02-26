@@ -11,9 +11,8 @@ import (
 func TestVersionEdit_Encode_Decode(t *testing.T) {
 	vSet := recoverVersionSet(t)
 
-	edit := &VersionEdit{}
+	edit := newVersionEdit()
 	edit.setLastSeq(1000)
-	edit.setCompareName([]byte("comparer.xx"))
 	edit.setNextFile(100)
 	edit.setLogNum(99)
 
@@ -34,7 +33,7 @@ func TestVersionEdit_Encode_Decode(t *testing.T) {
 	lk := collections.NewLinkBlockBuffer(0)
 	edit.EncodeTo(lk)
 
-	serialEdit := &VersionEdit{}
+	serialEdit := newVersionEdit()
 	serialEdit.DecodeFrom(lk)
 
 	t.Logf("edit=%v", edit)
