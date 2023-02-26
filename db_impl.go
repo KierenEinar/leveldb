@@ -21,10 +21,10 @@ import (
 )
 
 type DBImpl struct {
-	rwMutex    sync.RWMutex
-	versionSet *VersionSet
-
-	journalWriter *wal.JournalWriter
+	rwMutex          sync.RWMutex
+	versionSet       *VersionSet
+	journalSeqWriter storage.SequentialWriter
+	journalWriter    *wal.JournalWriter
 
 	shuttingDown uint32
 	closed       chan struct{}
@@ -333,11 +333,12 @@ func (dbImpl *DBImpl) makeRoomForWrite() error {
 			s := dbImpl.opt.Storage
 			writer, err := s.NewAppendableFile(journalFd)
 			if err == nil {
+				_ = dbImpl.journalSeqWriter.Close()
 				_ = dbImpl.journalWriter.Close()
 				dbImpl.frozenSeq = dbImpl.seqNum
 				dbImpl.frozenJournalFd = dbImpl.journalFd
 				dbImpl.journalFd = journalFd
-				dbImpl.journalWriter = wal.NewJournalWriter(writer)
+				dbImpl.journalWriter = wal.NewJournalWriter(writer, dbImpl.opt.NoWriteSync)
 				imm := dbImpl.mem
 				dbImpl.imm = imm
 
@@ -685,7 +686,7 @@ func (dbImpl *DBImpl) recoverLogFile(fd storage.Fd, edit *VersionEdit) error {
 	if err != nil {
 		return err
 	}
-	journalReader := wal.NewJournalReader(reader, dbImpl.opt.DropWholeBlockOnParseChunkErr)
+	journalReader := wal.NewJournalReader(reader, !dbImpl.opt.NoDropWholeBlockOnParseChunkErr)
 	memDB := dbImpl.mPoolGet(0)
 	memDB.Ref()
 	defer func() {
@@ -867,12 +868,20 @@ func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, e
 		opt.MaxManifestFileSize = 64 << 20 // 64m
 	}
 
+	if o == nil || o.AllowManifestRewriteIgnoreFailed == 0 {
+		opt.AllowManifestRewriteIgnoreFailed = 1000
+	}
+
 	if o == nil || o.MaxOpenFiles == 0 {
 		opt.MaxOpenFiles = 1000 // 1000
 	}
 
-	if o == nil || o.DropWholeBlockOnParseChunkErr {
-		opt.DropWholeBlockOnParseChunkErr = true
+	if o != nil && o.NoDropWholeBlockOnParseChunkErr == true {
+		o.NoDropWholeBlockOnParseChunkErr = true
+	}
+
+	if o != nil && o.NoWriteSync == true {
+		opt.NoWriteSync = true
 	}
 
 	return

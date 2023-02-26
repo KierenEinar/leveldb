@@ -1,7 +1,6 @@
 package leveldb
 
 import (
-	"bytes"
 	"encoding/binary"
 	"io"
 
@@ -32,7 +31,9 @@ type VersionEdit struct {
 }
 
 func (edit *VersionEdit) resetScratch() {
-	copy(edit.scratch[:], bytes.Repeat([]byte{0}, binary.MaxVarintLen64))
+	for idx := range edit.scratch {
+		edit.scratch[idx] = 0
+	}
 }
 
 func (edit *VersionEdit) reset() {

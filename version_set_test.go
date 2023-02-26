@@ -1,9 +1,17 @@
 package leveldb
 
 import (
+	"io/ioutil"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
+
+	"github.com/KierenEinar/leveldb/wal"
+
+	"github.com/KierenEinar/leveldb/options"
+
+	"github.com/KierenEinar/leveldb/storage"
 
 	"github.com/KierenEinar/leveldb/comparer"
 )
@@ -12,7 +20,8 @@ func Test_VersionBuilder(t *testing.T) {
 
 	t.Run("test add and delete table file", func(t *testing.T) {
 
-		vSet := initVersion(t)
+		vSet := recoverVersionSet(t)
+		defer vSet.opt.Storage.RemoveDir()
 
 		// del level 1 [1E, 1F], [1G, 1H], [1Q, 1R]
 		// add level 1 [1EA, 1FA], [1GA, 1GH], [1GI, 1GZ], [1QA, 1QZ]
@@ -83,15 +92,26 @@ func Test_VersionBuilder(t *testing.T) {
 
 }
 
-func initVersion(t *testing.T) *VersionSet {
+func initVersionEdit(t *testing.T) *VersionEdit {
 
-	opt, _ := sanitizeOptions(os.TempDir(), nil)
-	vSet := &VersionSet{
-		opt: opt,
-	}
-
+	//opt, _ := sanitizeOptions(os.TempDir(), nil)
+	//vSet := newVersionSet(opt)
+	//vset.recover()
+	//vSet := &VersionSet{
+	//	opt:          opt,
+	//	stSeqNum:     610,
+	//	stJournalNum: 98,
+	//	manifestFd: storage.Fd{
+	//		FileType: storage.KDescriptorFile,
+	//		Num:      169,
+	//	},
+	//	nextFileNum: 170,
+	//}
 	// each level design 10 sstable file
-	var lastVer *Version
+	baseTableFd := 100
+
+	edit := &VersionEdit{}
+
 	for i := 0; i < KLevelNum; i++ {
 		c := rune(65)
 		step := 1
@@ -104,8 +124,8 @@ func initVersion(t *testing.T) *VersionSet {
 			ei := c + rune(step)
 			s := strconv.Itoa(i) + string(si)
 			e := strconv.Itoa(i) + string(ei)
-			imin := buildInternalKey(nil, []byte(s), keyTypeValue, 100)
-			imax := buildInternalKey(nil, []byte(e), keyTypeValue, 100)
+			imin := buildInternalKey(nil, []byte(s), keyTypeValue, sequence(100*i+j))
+			imax := buildInternalKey(nil, []byte(e), keyTypeValue, sequence(100*i+j+1))
 
 			if i == 0 {
 				c = (si + ei) / 2
@@ -113,31 +133,71 @@ func initVersion(t *testing.T) *VersionSet {
 				c = ei + 1
 			}
 
-			t.Logf("level i=%d, min=%s, max=%s, number=%d", i, s, e, i*10+j)
-
-			edit := VersionEdit{
-				addedTables: []addTable{
-					{
-						level:  i,
-						size:   10,
-						number: uint64(i*10 + j),
-						imin:   imin,
-						imax:   imax,
-					},
-				},
+			tFile := &tFile{
+				fd:   baseTableFd,
+				iMax: imax,
+				iMin: imin,
 			}
 
-			v := &Version{}
-			vb := newBuilder(vSet, lastVer)
-			vb.apply(edit)
-			vb.saveTo(v)
-			lastVer = v
-			vSet.current = v
+			t.Logf("level i=%d, min=%s, minseq=%d, max=%s, maxseq=%d, number=%d", i, imin.userKey(),
+				imin.seq(), imax.userKey(), imax.seq(), tFile.fd)
+
+			edit.addTableFile(i, tFile)
+
+			baseTableFd = baseTableFd + 1
 		}
 	}
 
-	return vSet
+	lastTable := edit.addedTables[len(edit.addedTables)-1]
 
+	edit.setLastSeq(lastTable.imax.seq())
+	edit.setLogNum(99)
+	edit.setNextFile(lastTable.number + 1)
+	edit.setCompareName([]byte("comparer.leveldb.builtin.test"))
+
+	return edit
+
+}
+
+func initOpt(t *testing.T) *options.Options {
+
+	tmpDir, _ := ioutil.TempDir(os.TempDir(), "")
+	opt, err := sanitizeOptions(tmpDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return opt
+}
+
+func initManifest(t *testing.T, opt *options.Options) storage.Fd {
+
+	edit := initVersionEdit(t)
+
+	fd := storage.Fd{
+		FileType: storage.KDescriptorFile,
+		Num:      98,
+	}
+
+	w, err := opt.Storage.NewAppendableFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	jw := wal.NewJournalWriter(w, true)
+	edit.EncodeTo(jw)
+	_ = w.Flush()
+	return fd
+}
+
+func recoverVersionSet(t *testing.T) *VersionSet {
+	opt := initOpt(t)
+	manifestFd := initManifest(t, opt)
+	vSet := newVersionSet(opt)
+	err := vSet.recover(manifestFd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return vSet
 }
 
 func Test_upperBound(t *testing.T) {
@@ -264,4 +324,30 @@ func Test_vBuilder_maybeAddFile(t *testing.T) {
 			builder.maybeAddFile(tt.args.v, tt.args.file, tt.args.level)
 		})
 	}
+}
+
+func TestVersionSet_logAndApply(t *testing.T) {
+
+	vSet := recoverVersionSet(t)
+	mu := sync.RWMutex{}
+	mu.Lock()
+	defer mu.Unlock()
+	// delete manifest file
+	defer vSet.opt.Storage.Remove(vSet.manifestFd)
+	t.Run("test add level 0 file", func(t *testing.T) {
+
+		edit := &VersionEdit{}
+		tfile := tFile{
+			fd:   70,
+			iMin: buildInternalKey(nil, []byte("6AA"), keyTypeValue, 100),
+			iMax: buildInternalKey(nil, []byte("6DD"), keyTypeValue, 100),
+		}
+		edit.addTableFile(0, &tfile)
+		err := vSet.logAndApply(edit, &mu)
+		if err != nil {
+			t.Fatalf("add level 0 should not have err")
+		}
+
+	})
+
 }

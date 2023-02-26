@@ -8,8 +8,8 @@ import (
 	"github.com/KierenEinar/leveldb/collections"
 )
 
-func TestVersionEdit_EncodeTo(t *testing.T) {
-	vSet := initVersion(t)
+func TestVersionEdit_Encode_Decode(t *testing.T) {
+	vSet := recoverVersionSet(t)
 
 	edit := &VersionEdit{}
 	edit.setLastSeq(1000)

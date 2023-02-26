@@ -55,9 +55,9 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 			err = wErr
 			return
 		}
-
+		dbImpl.journalSeqWriter = sequentialWriter
 		dbImpl.journalFd = journalFd
-		dbImpl.journalWriter = wal.NewJournalWriter(sequentialWriter)
+		dbImpl.journalWriter = wal.NewJournalWriter(sequentialWriter, opt.NoWriteSync)
 		edit.setLogNum(dbImpl.journalFd.Num)
 		err = dbImpl.versionSet.logAndApply(&edit, &dbImpl.rwMutex)
 		if err != nil {

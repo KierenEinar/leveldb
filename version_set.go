@@ -24,15 +24,19 @@ type VersionSet struct {
 	current     *Version
 	compactPtrs [KLevelNum]*compactPtr
 
-	nextFileNum    uint64
-	stJournalNum   uint64
-	stSeqNum       sequence // current memtable start seq num
-	manifestFd     storage.Fd
-	manifestWriter *wal.JournalWriter
-	tableOperation *tableOperation
-	tableCache     *TableCache
-	blockCache     cache.Cache
-	opt            *options.Options
+	nextFileNum       uint64
+	stJournalNum      uint64
+	stSeqNum          sequence // current memtable start seq num
+	manifestFd        storage.Fd
+	manifestSeqWriter storage.SequentialWriter
+	manifestWriter    *wal.JournalWriter
+	tableOperation    *tableOperation
+	tableCache        *TableCache
+	blockCache        cache.Cache
+	opt               *options.Options
+
+	// statics
+	manifestRewriteFailed int64
 }
 
 func newVersionSet(opt *options.Options) *VersionSet {
@@ -391,76 +395,26 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 	finalize(v)
 	current.UnRef()
 
-	var (
-		stor           = vSet.opt.Storage
-		writer         storage.SequentialWriter
-		manifestWriter = vSet.manifestWriter
-		manifestFd     = vSet.manifestFd
-		newManifest    bool
-		err            error
-	)
-
-	if manifestWriter == nil {
-		newManifest = true
-	}
-
-	if manifestWriter != nil && manifestWriter.FileSize() >= vSet.opt.MaxManifestFileSize {
-		newManifest = true
-		manifestFd = storage.Fd{
-			FileType: storage.KDescriptorFile,
-			Num:      vSet.allocFileNum(),
-		}
-	}
-
-	edit.setNextFile(vSet.nextFileNum)
-
-	if newManifest {
-		writer, err = stor.NewAppendableFile(manifestFd)
-		if err == nil {
-			manifestWriter = wal.NewJournalWriter(writer)
-			err = vSet.writeSnapShot(manifestWriter) // write current version snapshot into manifest
-		}
+	if err := vSet.openNewManifestIfNeed(); err != nil {
+		return err
 	}
 
 	mutex.Unlock() // cause compaction is run in single thread, so we can avoid expensive write syscall
 
-	utils.Assert(manifestWriter != nil, "manifest writer must not nil")
-
-	if err == nil {
-		edit.EncodeTo(manifestWriter)
-		err = edit.err
-	}
-
-	if err == nil && manifestWriter != nil { // make compiler happy
-		err = manifestWriter.Sync()
-	}
-
-	if err == nil && newManifest {
-		err = stor.SetCurrent(manifestFd.Num)
-		if err == nil {
-			_ = vSet.manifestWriter.Close()
-		}
-	}
+	utils.Assert(vSet.manifestWriter != nil, "manifest writer must not nil")
+	edit.EncodeTo(vSet.manifestWriter)
+	err := vSet.manifestWriter.Sync()
 
 	mutex.Lock()
 
-	if err == nil {
-		if newManifest {
-			vSet.manifestWriter = manifestWriter
-		}
-		vSet.appendVersion(v)
-		vSet.stSeqNum = edit.lastSeq
-		vSet.stJournalNum = edit.journalNum
-	} else {
-		if newManifest && manifestWriter != vSet.manifestWriter {
-			if manifestWriter != nil {
-				_ = manifestWriter.Close()
-				_ = stor.Remove(manifestFd)
-			}
-		}
+	if err != nil {
+		return err
 	}
 
-	return err
+	vSet.appendVersion(v)
+	vSet.stSeqNum = edit.lastSeq
+	vSet.stJournalNum = edit.journalNum
+	return nil
 }
 
 // required: mutex held
@@ -557,7 +511,7 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	)
 
 	vBuilder := newBuilder(vSet, newVersion(vSet))
-	journalReader := wal.NewJournalReader(reader, vSet.opt.DropWholeBlockOnParseChunkErr)
+	journalReader := wal.NewJournalReader(reader, !vSet.opt.NoDropWholeBlockOnParseChunkErr)
 	for {
 
 		chunkReader, cErr := journalReader.NextChunk()
@@ -635,7 +589,6 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	vBuilder.saveTo(&version)
 	finalize(&version)
 	vSet.appendVersion(&version)
-	vSet.current = &version
 	vSet.manifestFd = storage.Fd{
 		FileType: storage.KDescriptorFile,
 		Num:      nextFileNum,
@@ -867,4 +820,71 @@ func (vSet *VersionSet) release(mu *sync.RWMutex) error {
 	vSet.appendVersion(version)
 
 	return nil
+}
+
+// noted: is not thread safe, caller should held mutex
+func (vSet *VersionSet) openNewManifestIfNeed() (err error) {
+
+	var (
+		opt            = vSet.opt
+		writer         = vSet.manifestSeqWriter
+		manifestWriter = vSet.manifestWriter
+		manifestFd     = vSet.manifestFd
+		stor           = vSet.opt.Storage
+		newManifest    bool
+		reWrite        bool
+	)
+
+	if manifestWriter == nil {
+		newManifest = true
+	}
+
+	if manifestWriter != nil && manifestWriter.FileSize() >= vSet.opt.MaxManifestFileSize {
+		reWrite = true
+		manifestFd = storage.Fd{
+			FileType: storage.KDescriptorFile,
+			Num:      vSet.allocFileNum(),
+		}
+	}
+
+	// no need create new manifest writer
+	if !newManifest {
+		return
+	}
+
+	defer func() {
+		if err != nil {
+			if reWrite {
+				if (vSet.manifestRewriteFailed) < opt.AllowManifestRewriteIgnoreFailed {
+					err = nil
+				}
+				vSet.manifestRewriteFailed++
+			}
+			_ = stor.Remove(manifestFd)
+		}
+	}()
+
+	if writer, err = stor.NewWritableFile(manifestFd); err != nil {
+		return
+	}
+	manifestWriter = wal.NewJournalWriter(writer, vSet.opt.NoWriteSync)
+	err = vSet.writeSnapShot(manifestWriter) // write current version snapshot into manifest
+	if err != nil {
+		return
+	}
+
+	err = stor.SetCurrent(manifestFd.Num)
+	if err != nil {
+		return
+	}
+
+	if reWrite {
+		_ = writer.Close()
+		_ = manifestWriter.Close()
+	}
+
+	vSet.manifestSeqWriter = writer
+	vSet.manifestWriter = manifestWriter
+
+	return
 }

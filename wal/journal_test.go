@@ -43,7 +43,7 @@ func Test_BasicWrite_Read(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		jw := NewJournalWriter(writer)
+		jw := NewJournalWriter(writer, false)
 		defer jw.Close()
 
 		chunk := bytes.Repeat([]byte{'x'}, kJournalBlockSize-7)
@@ -75,7 +75,7 @@ func Test_BasicWrite_Read(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		jw := NewJournalWriter(writer)
+		jw := NewJournalWriter(writer, false)
 		defer jw.Close()
 
 		chunk1 := bytes.Repeat([]byte{'x'}, kJournalBlockSize-14)

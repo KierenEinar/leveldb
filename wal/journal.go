@@ -51,11 +51,13 @@ type JournalWriter struct {
 	err         error
 	w           storage.SequentialWriter
 	blockOffset int
+	noSync      bool
 }
 
-func NewJournalWriter(writer storage.SequentialWriter) *JournalWriter {
+func NewJournalWriter(writer storage.SequentialWriter, noSync bool) *JournalWriter {
 	return &JournalWriter{
-		w: writer,
+		w:      writer,
+		noSync: noSync,
 	}
 }
 
@@ -182,11 +184,17 @@ func (jw *JournalWriter) writePhysicalRecord(data []byte, chunkType byte) error 
 }
 
 func (jw *JournalWriter) Close() error {
-	_ = jw.w.Sync()
-	return jw.w.Close()
+	if !jw.noSync {
+		err := jw.w.Sync()
+		return err
+	}
+	return nil
 }
 
 func (jw *JournalWriter) Sync() error {
+	if jw.noSync {
+		return jw.w.Flush()
+	}
 	return jw.w.Sync()
 }
 

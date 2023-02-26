@@ -33,23 +33,23 @@ func TestMain(m *testing.M) {
 	tmp, _ = ioutil.TempDir(os.TempDir(), "abc")
 	fs, _ = storage.OpenPath(tmp)
 	opt = &options.Options{
-		CreateIfMissingCurrent:        false,
-		InternalComparer:              comparer.DefaultComparer,
-		FilterPolicy:                  filter.DefaultFilter,
-		FilterBaseLg:                  12,
-		Storage:                       fs,
-		Hash32:                        fnv.New32(),
-		MaxManifestFileSize:           1 << 26,
-		MaxOpenFiles:                  1000,
-		WriteBufferSize:               1 << 22, // 4m
-		BlockCache:                    cache.NewCache(10, fnv.New32()),
-		BlockRestartInterval:          1 << 4,  // 16
-		BlockSize:                     1 << 12, // 4k
-		MaxEstimateFileSize:           1 << 21, // 2m
-		NoVerifyCheckSum:              false,
-		GPOverlappedLimit:             10,
-		MaxCompactionLimitFactor:      25,
-		DropWholeBlockOnParseChunkErr: false,
+		CreateIfMissingCurrent:          false,
+		InternalComparer:                comparer.DefaultComparer,
+		FilterPolicy:                    filter.DefaultFilter,
+		FilterBaseLg:                    12,
+		Storage:                         fs,
+		Hash32:                          fnv.New32(),
+		MaxManifestFileSize:             1 << 26,
+		MaxOpenFiles:                    1000,
+		WriteBufferSize:                 1 << 22, // 4m
+		BlockCache:                      cache.NewCache(10, fnv.New32()),
+		BlockRestartInterval:            1 << 4,  // 16
+		BlockSize:                       1 << 12, // 4k
+		MaxEstimateFileSize:             1 << 21, // 2m
+		NoVerifyCheckSum:                false,
+		GPOverlappedLimit:               10,
+		MaxCompactionLimitFactor:        25,
+		NoDropWholeBlockOnParseChunkErr: false,
 	}
 
 	defer fs.Close()

@@ -33,6 +33,9 @@ type Options struct {
 	// max manifest file bytes size, set default 64m
 	MaxManifestFileSize int64
 
+	// when manifest write to new file failed, allow max failed, set default 1000
+	AllowManifestRewriteIgnoreFailed int64
+
 	// max open ldb file in cache, set default 1000
 	MaxOpenFiles uint32
 
@@ -67,10 +70,10 @@ type Options struct {
 	// trigger stop write and force level0 compaction
 	Level0StopWriteTrigger int
 
-	// when part of journal chunk parse err, drop whole block. set default true, when set false,
+	// when part of journal chunk parse err, drop whole block. set default false, when set true,
 	// it will return error when recover log file or recover manifest.
-	DropWholeBlockOnParseChunkErr bool
+	NoDropWholeBlockOnParseChunkErr bool
 
 	// each write will call sync, set default false, using file page cache
-	WriteSync bool
+	NoWriteSync bool
 }

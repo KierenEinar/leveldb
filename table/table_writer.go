@@ -385,7 +385,7 @@ func (tableWriter *Writer) Close() error {
 		return err
 	}
 
-	if tableWriter.opt.WriteSync {
+	if tableWriter.opt.NoWriteSync {
 		err = w.Sync()
 	}
 
