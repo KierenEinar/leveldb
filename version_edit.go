@@ -1,7 +1,6 @@
 package leveldb
 
 import (
-	"bytes"
 	"encoding/binary"
 	"io"
 
@@ -29,12 +28,12 @@ type VersionEdit struct {
 	delTables    []delTable
 	addedTables  []addTable
 	err          error
-	buffer       *bytes.Buffer
+	buffer       []byte
 }
 
 func newVersionEdit() *VersionEdit {
 	return &VersionEdit{
-		buffer: bytes.NewBuffer(nil),
+		buffer: make([]byte, 0),
 	}
 }
 
@@ -54,7 +53,7 @@ func (edit *VersionEdit) reset() {
 	edit.delTables = nil
 	edit.addedTables = nil
 	edit.resetScratch()
-	edit.buffer.Reset()
+	edit.buffer = edit.buffer[:0]
 	edit.err = nil
 }
 
@@ -182,8 +181,8 @@ func (edit *VersionEdit) EncodeTo(dest io.Writer) {
 		panic("leveldb/version_edit unsupport type")
 	}
 
-	_, edit.err = edit.buffer.WriteTo(dest)
-
+	_, edit.err = dest.Write(edit.buffer)
+	edit.buffer = edit.buffer[:0]
 }
 
 func (edit *VersionEdit) DecodeFrom(src storage.SequentialReader) {
@@ -285,18 +284,18 @@ func (edit *VersionEdit) writeHeader(typ int) {
 func (edit *VersionEdit) writeBytes(value []byte) {
 	size := len(value)
 	edit.putVarInt(size)
-	edit.buffer.Write(value)
+	edit.buffer = append(edit.buffer, value...)
 }
 
 func (edit *VersionEdit) putVarInt(value int) {
 	x := binary.PutVarint(edit.scratch[:], int64(value))
-	_, edit.err = edit.buffer.Write(edit.scratch[:x])
+	edit.buffer = append(edit.buffer, edit.scratch[:x]...)
 	return
 }
 
 func (edit *VersionEdit) putUVarInt(value uint64) {
 	x := binary.PutUvarint(edit.scratch[:], value)
-	_, edit.err = edit.buffer.Write(edit.scratch[:x])
+	edit.buffer = append(edit.buffer, edit.scratch[:x]...)
 	return
 }
 
