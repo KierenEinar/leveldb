@@ -1,26 +1,27 @@
 package leveldb
 
 import (
+	"bytes"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
 
+	"github.com/KierenEinar/leveldb/comparer"
+
 	"github.com/KierenEinar/leveldb/wal"
 
 	"github.com/KierenEinar/leveldb/options"
 
 	"github.com/KierenEinar/leveldb/storage"
-
-	"github.com/KierenEinar/leveldb/comparer"
 )
 
 func Test_VersionBuilder(t *testing.T) {
 
 	t.Run("test add and delete table file", func(t *testing.T) {
 
-		vSet := recoverVersionSet(t)
+		vSet, _ := recoverVersionSet(t)
 		defer vSet.opt.Storage.RemoveDir()
 
 		// del level 1 [1E, 1F], [1G, 1H], [1Q, 1R]
@@ -92,112 +93,68 @@ func Test_VersionBuilder(t *testing.T) {
 
 }
 
-func initVersionEdit(t *testing.T, opt *options.Options) *VersionEdit {
+func TestVersionSet_logAndApply(t *testing.T) {
 
-	//opt, _ := sanitizeOptions(os.TempDir(), nil)
-	//vSet := newVersionSet(opt)
-	//vset.recover()
-	//vSet := &VersionSet{
-	//	opt:          opt,
-	//	stSeqNum:     610,
-	//	stJournalNum: 98,
-	//	manifestFd: storage.Fd{
-	//		FileType: storage.KDescriptorFile,
-	//		Num:      169,
-	//	},
-	//	nextFileNum: 170,
-	//}
-	// each level design 10 sstable file
-	baseTableFd := 100
+	vSet, _ := recoverVersionSet(t)
+	mu := sync.RWMutex{}
+	mu.Lock()
+	defer mu.Unlock()
+	// delete manifest file
+	defer vSet.opt.Storage.Remove(vSet.manifestFd)
+	baseFd := 100
+	t.Run("test add level 0 file", func(t *testing.T) {
 
-	edit := newVersionEdit()
+		edit := newVersionEdit()
+		tfile := tFile{
+			fd:   baseFd + 70,
+			iMin: buildInternalKey(nil, []byte("6AA"), keyTypeValue, 100),
+			iMax: buildInternalKey(nil, []byte("6DD"), keyTypeValue, 100),
+		}
+		edit.addTableFile(0, &tfile)
+		err := vSet.logAndApply(edit, &mu)
+		if err != nil {
+			t.Fatalf("add level 0 should not have err")
+		}
 
-	for i := 0; i < KLevelNum; i++ {
-		c := rune(65)
-		step := 1
+	})
 
-		for j := 0; j < 10; j++ {
-			if i == 0 {
-				step = 8
-			}
-			si := c
-			ei := c + rune(step)
-			s := strconv.Itoa(i) + string(si)
-			e := strconv.Itoa(i) + string(ei)
-			imin := buildInternalKey(nil, []byte(s), keyTypeValue, sequence(100*i+j))
-			imax := buildInternalKey(nil, []byte(e), keyTypeValue, sequence(100*i+j+1))
+}
 
-			if i == 0 {
-				c = (si + ei) / 2
-			} else {
-				c = ei + 1
-			}
+func TestVersionSet_recover(t *testing.T) {
 
-			tFile := &tFile{
-				fd:   baseTableFd,
-				iMax: imax,
-				iMin: imin,
-			}
+	vSet, edit := recoverVersionSet(t)
+	defer vSet.opt.Storage.RemoveDir()
 
-			t.Logf("level i=%d, min=%s, minseq=%d, max=%s, maxseq=%d, number=%d", i, imin.userKey(),
-				imin.seq(), imax.userKey(), imax.seq(), tFile.fd)
+	if vSet.nextFileNum != edit.nextFileNum {
+		t.Fatalf("vSet.nextFileNum=%d should eq edit.nextFileNum=%d", vSet.nextFileNum, edit.nextFileNum)
+	}
 
-			edit.addTableFile(i, tFile)
+	if vSet.stJournalNum != edit.journalNum {
+		t.Fatalf("vSet.stJournalNum=%d should eq edit.journalNum=%d", vSet.stJournalNum, edit.journalNum)
+	}
 
-			baseTableFd = baseTableFd + 1
+	if vSet.stSeqNum != edit.lastSeq {
+		t.Fatalf("vSet.stSeqNum=%d should eq edit.lastSeq=%d", vSet.stSeqNum, edit.lastSeq)
+	}
+
+	current := vSet.getCurrent()
+	current.Ref()
+	defer current.UnRef()
+
+	liveFiles := make(map[uint64]*tFile)
+	vSet.addLiveFilesForTest(liveFiles)
+
+	for _, v := range edit.addedTables {
+		tf, ok := liveFiles[v.number]
+		if ok && bytes.Equal(tf.iMin, v.imin) && bytes.Equal(tf.iMax, v.imax) {
+			delete(liveFiles, v.number)
 		}
 	}
 
-	lastTable := edit.addedTables[len(edit.addedTables)-1]
-
-	edit.setLastSeq(lastTable.imax.seq())
-	edit.setLogNum(99)
-	edit.setNextFile(lastTable.number + 1)
-	edit.setCompareName(opt.InternalComparer.Name())
-
-	return edit
-
-}
-
-func initOpt(t *testing.T) *options.Options {
-
-	tmpDir, _ := ioutil.TempDir(os.TempDir(), "")
-	opt, err := sanitizeOptions(tmpDir, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return opt
-}
-
-func initManifest(t *testing.T, opt *options.Options) storage.Fd {
-
-	edit := initVersionEdit(t, opt)
-
-	fd := storage.Fd{
-		FileType: storage.KDescriptorFile,
-		Num:      98,
+	if len(liveFiles) != 0 {
+		t.Fatal("vSet.liveFiles should empty")
 	}
 
-	w, err := opt.Storage.NewAppendableFile(fd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-	jw := wal.NewJournalWriter(w, true)
-	edit.EncodeTo(jw)
-	_ = w.Flush()
-	return fd
-}
-
-func recoverVersionSet(t *testing.T) *VersionSet {
-	opt := initOpt(t)
-	manifestFd := initManifest(t, opt)
-	vSet := newVersionSet(opt)
-	err := vSet.recover(manifestFd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return vSet
 }
 
 func Test_upperBound(t *testing.T) {
@@ -326,29 +283,100 @@ func Test_vBuilder_maybeAddFile(t *testing.T) {
 	}
 }
 
-func TestVersionSet_logAndApply(t *testing.T) {
+func initVersionEdit(t *testing.T, opt *options.Options) *VersionEdit {
 
-	vSet := recoverVersionSet(t)
-	mu := sync.RWMutex{}
-	mu.Lock()
-	defer mu.Unlock()
-	// delete manifest file
-	defer vSet.opt.Storage.Remove(vSet.manifestFd)
-	baseFd := 100
-	t.Run("test add level 0 file", func(t *testing.T) {
+	baseTableFd := 100
 
-		edit := newVersionEdit()
-		tfile := tFile{
-			fd:   baseFd + 70,
-			iMin: buildInternalKey(nil, []byte("6AA"), keyTypeValue, 100),
-			iMax: buildInternalKey(nil, []byte("6DD"), keyTypeValue, 100),
+	edit := newVersionEdit()
+
+	for i := 0; i < KLevelNum; i++ {
+		c := rune(65)
+		step := 1
+
+		for j := 0; j < 10; j++ {
+			if i == 0 {
+				step = 8
+			}
+			si := c
+			ei := c + rune(step)
+			s := strconv.Itoa(i) + string(si)
+			e := strconv.Itoa(i) + string(ei)
+			imin := buildInternalKey(nil, []byte(s), keyTypeValue, sequence(100*i+j))
+			imax := buildInternalKey(nil, []byte(e), keyTypeValue, sequence(100*i+j+1))
+
+			if i == 0 {
+				c = (si + ei) / 2
+			} else {
+				c = ei + 1
+			}
+
+			tFile := &tFile{
+				fd:   baseTableFd,
+				iMax: imax,
+				iMin: imin,
+			}
+
+			t.Logf("level i=%d, min=%s, minseq=%d, max=%s, maxseq=%d, number=%d", i, imin.userKey(),
+				imin.seq(), imax.userKey(), imax.seq(), tFile.fd)
+
+			edit.addTableFile(i, tFile)
+
+			if j == 5 {
+				edit.addCompactPtr(i, imax)
+			}
+
+			baseTableFd = baseTableFd + 1
 		}
-		edit.addTableFile(0, &tfile)
-		err := vSet.logAndApply(edit, &mu)
-		if err != nil {
-			t.Fatalf("add level 0 should not have err")
-		}
+	}
 
-	})
+	lastTable := edit.addedTables[len(edit.addedTables)-1]
 
+	edit.setLastSeq(lastTable.imax.seq())
+	edit.setLogNum(99)
+	edit.setNextFile(lastTable.number + 1)
+	edit.setCompareName(opt.InternalComparer.Name())
+
+	return edit
+
+}
+
+func initOpt(t *testing.T) *options.Options {
+
+	tmpDir, _ := ioutil.TempDir(os.TempDir(), "")
+	opt, err := sanitizeOptions(tmpDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return opt
+}
+
+func initManifest(t *testing.T, opt *options.Options) (storage.Fd, *VersionEdit) {
+
+	edit := initVersionEdit(t, opt)
+
+	fd := storage.Fd{
+		FileType: storage.KDescriptorFile,
+		Num:      98,
+	}
+
+	w, err := opt.Storage.NewAppendableFile(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	jw := wal.NewJournalWriter(w, true)
+	edit.EncodeTo(jw)
+	_ = w.Flush()
+	return fd, edit
+}
+
+func recoverVersionSet(t *testing.T) (*VersionSet, *VersionEdit) {
+	opt := initOpt(t)
+	manifestFd, edit := initManifest(t, opt)
+	vSet := newVersionSet(opt)
+	err := vSet.recover(manifestFd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return vSet, edit
 }

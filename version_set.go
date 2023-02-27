@@ -478,7 +478,7 @@ func finalize(v *Version) {
 			bestLevel = 0
 		} else {
 			totalSize := uint64(v.levels[level].size())
-			score := float64(totalSize / MaxBytesForLevel(level))
+			score := float64(totalSize / maxBytesForLevel(level))
 			if score > bestScore {
 				bestScore = score
 				bestLevel = level
@@ -512,11 +512,7 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 		return
 	}
 
-	var (
-		edit *VersionEdit
-	)
-
-	edit = newVersionEdit()
+	edit := newVersionEdit()
 
 	vBuilder := newBuilder(vSet, newVersion(vSet))
 	journalReader := wal.NewJournalReader(reader, !vSet.opt.NoDropWholeBlockOnParseChunkErr)
@@ -612,6 +608,19 @@ func (vSet *VersionSet) addLiveFiles(expected map[uint64]struct{}) {
 		for _, level := range ver.levels {
 			for _, v := range level {
 				expected[uint64(v.fd)] = struct{}{}
+			}
+		}
+		ele = ele.Next()
+	}
+}
+
+func (vSet *VersionSet) addLiveFilesForTest(expected map[uint64]*tFile) {
+	ele := vSet.versions.Front()
+	for ele != nil {
+		ver := ele.Value.(*Version)
+		for _, level := range ver.levels {
+			for idx, v := range level {
+				expected[uint64(v.fd)] = level[idx]
 			}
 		}
 		ele = ele.Next()

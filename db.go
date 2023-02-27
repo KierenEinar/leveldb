@@ -17,7 +17,7 @@ const KLevelNum = 7
 
 const KLevel1SizeThreshold = 10 * (1 << 20) //10m
 
-func MaxBytesForLevel(level int) uint64 {
+func maxBytesForLevel(level int) uint64 {
 	result := uint64(KLevel1SizeThreshold)
 	for level > 1 {
 		result *= 10

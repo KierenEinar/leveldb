@@ -9,7 +9,7 @@ import (
 )
 
 func TestVersionEdit_Encode_Decode(t *testing.T) {
-	vSet := recoverVersionSet(t)
+	vSet, _ := recoverVersionSet(t)
 
 	edit := newVersionEdit()
 	edit.setLastSeq(1000)
