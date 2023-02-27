@@ -594,6 +594,12 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	vSet.nextFileNum = nextFileNum
 	vSet.stSeqNum = seqNum
 	vSet.stJournalNum = logFileNum
+
+	vSet.manifestFd = storage.Fd{
+		FileType: storage.KDescriptorFile,
+		Num:      vSet.allocFileNum(),
+	}
+
 	return
 }
 

@@ -101,19 +101,44 @@ func TestVersionSet_logAndApply(t *testing.T) {
 	defer mu.Unlock()
 	// delete manifest file
 	defer vSet.opt.Storage.Remove(vSet.manifestFd)
-	baseFd := 100
-	t.Run("test add level 0 file", func(t *testing.T) {
+
+	t.Run("test add level 0 file and delete", func(t *testing.T) {
 
 		edit := newVersionEdit()
 		tfile := tFile{
-			fd:   baseFd + 70,
+			fd:   int(vSet.allocFileNum()),
 			iMin: buildInternalKey(nil, []byte("6AA"), keyTypeValue, 100),
 			iMax: buildInternalKey(nil, []byte("6DD"), keyTypeValue, 100),
 		}
 		edit.addTableFile(0, &tfile)
+
+		level0LastTable := vSet.current.levels[0][0]
 		err := vSet.logAndApply(edit, &mu)
 		if err != nil {
 			t.Fatalf("add level 0 should not have err")
+		}
+
+		edit.addDelTable(0, uint64(level0LastTable.fd))
+
+		err = vSet.logAndApply(edit, &mu)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// verify level0 table
+		existsAdd := false
+		for _, table := range vSet.current.levels[0] {
+			if table.fd == level0LastTable.fd {
+				t.Fatalf("should not exists")
+			}
+
+			if table.fd == tfile.fd {
+				existsAdd = true
+			}
+		}
+
+		if !existsAdd {
+			t.Fatalf("should exists")
 		}
 
 	})
@@ -375,6 +400,10 @@ func recoverVersionSet(t *testing.T) (*VersionSet, *VersionEdit) {
 	manifestFd, edit := initManifest(t, opt)
 	vSet := newVersionSet(opt)
 	err := vSet.recover(manifestFd)
+	vSet.manifestFd = storage.Fd{
+		FileType: storage.KDescriptorFile,
+		Num:      vSet.allocFileNum(),
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
