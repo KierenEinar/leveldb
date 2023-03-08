@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KierenEinar/leveldb/table"
+
 	"github.com/KierenEinar/leveldb/collections"
 
 	"github.com/KierenEinar/leveldb/utils"
@@ -186,6 +188,17 @@ func TestVersion_get(t *testing.T) {
 	vSet, _ := recoverVersionSet(t)
 	defer vSet.opt.Storage.RemoveDir()
 	initDataSetForVersion(t, vSet)
+
+	version := vSet.current
+	version.Ref()
+	defer version.UnRef()
+
+	expectediKey := buildInternalKey(nil, []byte("5QAA"), keyTypeValue, kMaxNum)
+	var value []byte
+	_, err := version.get(expectediKey, &value)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 }
 
@@ -379,6 +392,7 @@ func initOpt(t *testing.T) *options.Options {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("tmpdir = %s", tmpDir)
 	return opt
 }
 
@@ -426,16 +440,16 @@ func initDataSetForVersion(t *testing.T, vSet *VersionSet) {
 
 	current.Ref()
 	defer current.UnRef()
-	for _, tfiles := range current.levels {
-		for _, tfile := range tfiles {
+	for _, tFiles := range current.levels {
+		for ix := range tFiles {
+			tFile := *tFiles[ix]
 			tableOperation := newTableOperation(vSet.opt, vSet.tableCache)
-			twriter, err := tableOperation.create(*tfile)
+			tWriter, err := tableOperation.create(tFile)
 			if err != nil {
 				t.Fatal(err)
 			}
-			iMinKey := tfile.iMin
-			iMaxKey := tfile.iMax
-
+			iMinKey := tFile.iMin
+			iMaxKey := tFile.iMax
 			minSeq := iMinKey.seq()
 			maxSeq := iMaxKey.seq()
 			seq := minSeq
@@ -466,22 +480,31 @@ func initDataSetForVersion(t *testing.T, vSet *VersionSet) {
 					idx++
 				}
 			})
+
 			iter := skipList.NewIterator()
 			for iter.Next() {
-				err = twriter.append(iter.Key(), iter.Value())
+				err = tWriter.append(iter.Key(), iter.Value())
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
-			err = twriter.finish()
+			err = tWriter.finish()
 
 			if err != nil {
 				t.Fatal(err)
 			}
 			iter.UnRef()
 			skipList.UnRef()
-		}
 
+			reader, _ := vSet.opt.Storage.NewSequentialReader(storage.Fd{
+				FileType: storage.KTableFile,
+				Num:      uint64(tFile.fd),
+			})
+
+			dump := table.NewDump(reader, os.Stdout, vSet.opt.FilterPolicy)
+			dump.Format()
+			reader.Close()
+		}
 	}
 
 }

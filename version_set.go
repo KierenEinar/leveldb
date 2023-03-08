@@ -183,7 +183,15 @@ func (builder *vBuilder) maybeAddFile(v *Version, file *tFile, level int) {
 			fmt.Sprintf("last file imax=%s, newfile min=%s", files[len(files)-1].iMax, file.iMin))
 	}
 
-	v.levels[level] = append(v.levels[level], file)
+	dupFile := &tFile{
+		fd:         file.fd,
+		iMax:       append(file.iMax),
+		iMin:       append(file.iMin),
+		size:       file.size,
+		allowSeeks: file.allowSeeks,
+	}
+
+	v.levels[level] = append(v.levels[level], dupFile)
 }
 
 type uintSortedSet struct {
@@ -732,7 +740,8 @@ func (v *Version) get(ikey internalKey, value *[]byte) (gStat *GetStat, err erro
 func (v *Version) foreachOverlapping(ikey internalKey, f func(level int, tFile *tFile) (continueLoop bool)) {
 	tmp := make(tFiles, 0)
 	ukey := ikey.userKey()
-	for _, level0 := range v.levels[0] {
+	for ix := range v.levels[0] {
+		level0 := v.levels[0][ix]
 		if bytes.Compare(level0.iMin.userKey(), ukey) <= 0 && bytes.Compare(level0.iMax.userKey(), ukey) >= 0 {
 			tmp = append(tmp, level0)
 		}

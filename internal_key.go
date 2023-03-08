@@ -19,7 +19,7 @@ const (
 )
 
 const kMaxSequenceNum = (uint64(1) << 56) - 1
-const kMaxNum = kMaxSequenceNum | uint64(keyTypeValue)
+const kMaxNum = sequence(kMaxSequenceNum | uint64(keyTypeValue))
 
 type internalKey []byte
 
@@ -59,7 +59,7 @@ func parseInternalKey(ikey internalKey) (ukey []byte, kt keyType, seq uint64, er
 	seq, kty := num>>8, num&0xff
 	kt = keyType(kty)
 	if kt > keyTypeDel {
-		err = errors.NewErrCorruption("invalid internal ikey keytype")
+		err = errors.NewErrCorruption(fmt.Sprintf("invalid internal ikey keytype, kt=%d", kt))
 		return
 	}
 	return

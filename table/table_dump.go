@@ -448,7 +448,7 @@ func (dump *Dump) readAll() error {
 	dump.dumpSSTable = ssTable
 
 	// output whole datablock in filter block static console
-	dump.calculateFilterStatic()
+	//dump.calculateFilterStatic()
 
 	return nil
 }
