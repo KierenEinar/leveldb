@@ -1,6 +1,9 @@
 package utils
 
 import (
+	"bytes"
+	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -9,9 +12,27 @@ const mutexLocked = 1
 
 func AssertMutexHeld(mutex *sync.RWMutex) {}
 
-func Assert(condition bool, msg ...string) {
+func Assert(condition bool, msgs ...string) {
 	if !condition {
-		panic(msg)
+		fetalMsg := bytes.NewBuffer(nil)
+		_, file, line, _ := runtime.Caller(2)
+		// file
+		fetalMsg.WriteString("file:")
+		fetalMsg.WriteString(file)
+		fetalMsg.WriteString("\n")
+		// line
+		fetalMsg.WriteString("line:")
+		fetalMsg.WriteString(strconv.Itoa(line))
+		fetalMsg.WriteString("\n")
+
+		// msgs
+		for idx, msg := range msgs {
+			fetalMsg.WriteString(msg)
+			if idx != len(msgs)-1 {
+				fetalMsg.WriteString("\n")
+			}
+		}
+		panic(fetalMsg)
 	}
 }
 

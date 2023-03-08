@@ -174,12 +174,19 @@ func (bw *blockWriter) bytesLen() int {
 func (bw *blockWriter) writeEntry(key []byte, value []byte) {
 
 	var (
-		shareUKey     = bw.comparer.Prefix(bw.prevKey.Bytes(), key)
-		shareUKeyLen  = len(shareUKey)
-		unShareKeyLen = len(key) - shareUKeyLen
-		unShareKey    = key[shareUKeyLen:]
+		shareUKey     []byte
+		shareUKeyLen  int
+		unShareKeyLen = len(key)
+		unShareKey    = key
 		vLen          = len(value)
 	)
+
+	if bw.prevKey.Len() > 0 {
+		shareUKey = bw.comparer.Prefix(bw.prevKey.Bytes(), key)
+		shareUKeyLen = len(shareUKey)
+		unShareKeyLen = len(key) - shareUKeyLen
+		unShareKey = key[shareUKeyLen:]
+	}
 
 	s1 := binary.PutUvarint(bw.uVarIntScratch[:], uint64(shareUKeyLen))
 	n1, _ := bw.data.Write(bw.uVarIntScratch[:s1])

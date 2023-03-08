@@ -194,15 +194,16 @@ func (t *tWriter) finish() error {
 		return err
 	}
 
-	iter, err := t.tableCache.NewIterator(&t.fileMeta)
-	if err == nil {
-		iter.UnRef()
-		t.fileMeta.iMax = t.last
-		t.fileMeta.iMin = t.first
-		t.fileMeta.size = t.approximateSize()
-	}
+	t.fileMeta.iMax = t.last
+	t.fileMeta.iMin = t.first
+	t.fileMeta.size = t.approximateSize()
 
-	return err
+	iter, err := t.tableCache.NewIterator(&t.fileMeta)
+	if err != nil {
+		return err
+	}
+	iter.UnRef()
+	return nil
 
 }
 

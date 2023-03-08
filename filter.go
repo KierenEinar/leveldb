@@ -19,7 +19,9 @@ func (iFilter iKeyFilter) MayContains(key, filter []byte) bool {
 }
 
 func (iFilter iKeyFilter) NewGenerator() filter.IFilterGenerator {
-	return &iKeyFilterGenerator{}
+	return &iKeyFilterGenerator{
+		uKeyGenerator: iFilter.uKeyFilter.NewGenerator(),
+	}
 }
 
 func (iFilter iKeyFilter) Name() string {
@@ -35,5 +37,7 @@ func (iKeyFilterGenerator iKeyFilterGenerator) Generate(b *bytes.Buffer) {
 }
 
 var (
-	IFilter = &iKeyFilter{}
+	IFilter = &iKeyFilter{
+		uKeyFilter: filter.DefaultFilter,
+	}
 )

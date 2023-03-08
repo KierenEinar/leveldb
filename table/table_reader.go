@@ -293,11 +293,11 @@ func (reader *Reader) readMeta() (err error) {
 
 	metaContent, err = reader.readBlock(reader.metaIndexBH)
 	if err == nil {
-		block, err := newDataBlock(metaContent, reader.cmp)
+		block, err := newDataBlock(metaContent, comparer.DefaultComparer)
 		key := "filter." + reader.opt.FilterPolicy.Name()
 		if err == nil {
 
-			iter := newBlockIter(block, reader.cmp)
+			iter := newBlockIter(block, comparer.DefaultComparer)
 			if iter.Seek([]byte(key)) && iter.Valid() == nil {
 				reader.readFilter(iter.Value())
 			}

@@ -25,7 +25,8 @@ type internalKey []byte
 
 func (ik internalKey) assert() {
 	_, _, _, err := parseInternalKey(ik)
-	utils.Assert(err == nil, fmt.Sprintf("internal key parse failed, err=%v", err))
+	utils.Assert(err == nil, fmt.Sprintf("internal key parse failed, err=%v", err),
+		fmt.Sprintf("ik=%s", ik))
 }
 
 func (ik internalKey) userKey() []byte {

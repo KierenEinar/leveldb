@@ -10,6 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KierenEinar/leveldb/collections"
+
+	"github.com/KierenEinar/leveldb/utils"
+
 	"github.com/KierenEinar/leveldb/comparer"
 
 	"github.com/KierenEinar/leveldb/wal"
@@ -177,6 +181,14 @@ func TestVersionSet_recover(t *testing.T) {
 
 }
 
+func TestVersion_get(t *testing.T) {
+
+	vSet, _ := recoverVersionSet(t)
+	defer vSet.opt.Storage.RemoveDir()
+	initDataSetForVersion(t, vSet)
+
+}
+
 func Test_upperBound(t *testing.T) {
 	type args struct {
 		s     tFiles
@@ -321,8 +333,8 @@ func initVersionEdit(t *testing.T, opt *options.Options) *VersionEdit {
 			ei := c + rune(step)
 			s := strconv.Itoa(i) + string(si)
 			e := strconv.Itoa(i) + string(ei)
-			imin := buildInternalKey(nil, []byte(s), keyTypeValue, sequence(100*i+j))
-			imax := buildInternalKey(nil, []byte(e), keyTypeValue, sequence(100*i+j+1))
+			imin := buildInternalKey(nil, []byte(s), keyTypeValue, sequence((100*i+j)*1000)+2)
+			imax := buildInternalKey(nil, []byte(e), keyTypeValue, sequence(100*i+j+1)*1000+1)
 
 			if i == 0 {
 				c = (si + ei) / 2
@@ -405,6 +417,71 @@ func recoverVersionSet(t *testing.T) (*VersionSet, *VersionEdit) {
 	return vSet, edit
 }
 
-func TestVersion_get(t *testing.T) {
+func initDataSetForVersion(t *testing.T, vSet *VersionSet) {
+
+	current := vSet.getCurrent()
+	if current == nil {
+		t.Fatal("version is nil")
+	}
+
+	current.Ref()
+	defer current.UnRef()
+	for _, tfiles := range current.levels {
+		for _, tfile := range tfiles {
+			tableOperation := newTableOperation(vSet.opt, vSet.tableCache)
+			twriter, err := tableOperation.create(*tfile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			iMinKey := tfile.iMin
+			iMaxKey := tfile.iMax
+
+			minSeq := iMinKey.seq()
+			maxSeq := iMaxKey.seq()
+			seq := minSeq
+			minUKey := iMinKey.userKey()
+			maxUKey := iMaxKey.userKey()
+			loopTimes := 10
+			skipList := collections.NewSkipList(time.Now().UnixNano(), 0, vSet.opt.InternalComparer)
+			idx := 0
+			utils.ForeachLetter(loopTimes, func(i int, c rune) {
+				seq++
+				key := append(minUKey, bytes.Repeat([]byte{byte(c)}, idx)...)
+				ikey := buildInternalKey(nil, key, keyTypeValue, seq)
+				value := append([]byte("value-"), key...)
+				err = skipList.Put(ikey, value)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if seq > maxSeq {
+					t.Fatal("seq should not gt maxeq")
+				}
+
+				if vSet.opt.InternalComparer.Compare(ikey, iMaxKey) > 0 {
+					t.Fatalf("userkey=%s should not gt maxuserkey=%s", ikey.userKey(), maxUKey)
+				}
+
+				if i == len(utils.LetterBytes())-1 {
+					idx++
+				}
+			})
+			iter := skipList.NewIterator()
+			for iter.Next() {
+				err = twriter.append(iter.Key(), iter.Value())
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = twriter.finish()
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			iter.UnRef()
+			skipList.UnRef()
+		}
+
+	}
 
 }
