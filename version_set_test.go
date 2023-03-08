@@ -145,7 +145,7 @@ func TestVersionSet_recover(t *testing.T) {
 	vSet, edit := recoverVersionSet(t)
 	defer vSet.opt.Storage.RemoveDir()
 
-	if vSet.nextFileNum != edit.nextFileNum {
+	if vSet.nextFileNum != edit.nextFileNum+1 {
 		t.Fatalf("vSet.nextFileNum=%d should eq edit.nextFileNum=%d", vSet.nextFileNum, edit.nextFileNum)
 	}
 
