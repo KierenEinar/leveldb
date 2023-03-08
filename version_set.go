@@ -179,7 +179,8 @@ func (builder *vBuilder) maybeAddFile(v *Version, file *tFile, level int) {
 			fmt.Printf("%s-%s, %s\n", files[len(files)-1].iMax.userKey(),
 				files[len(files)-1].iMin.userKey(), file.iMin.userKey())
 		}
-		utils.Assert(cmp.Compare(files[len(files)-1].iMax, file.iMin) < 0)
+		utils.Assert(cmp.Compare(files[len(files)-1].iMax, file.iMin) < 0,
+			fmt.Sprintf("last file imax=%s, newfile min=%s", files[len(files)-1].iMax, file.iMin))
 	}
 
 	v.levels[level] = append(v.levels[level], file)
@@ -361,22 +362,6 @@ func (vSet *VersionSet) logAndApply(edit *VersionEdit, mutex *sync.RWMutex) erro
 
 	utils.AssertMutexHeld(mutex)
 
-	/**
-	case 1: compactMemtable
-		edit.setSeq(db.frozenSeqNum)
-		edit.setJournalNum(db.journal.Fd)
-		edit.addTable(xx)
-
-	case 2:
-		table compaction:
-			edit.addTable(xx)
-			edit.delTable(xx)
-
-	conclusion: all compaction need to be serialize execute.
-	but minor compaction, only affect level 0 and is add file. major compaction not affect minor compaction.
-	so we can let mem compact and table compact concurrently execute. when install new version, we need a lock
-	to protect.
-	*/
 	if edit.hasRec(kJournalNum) {
 		utils.Assert(edit.journalNum >= vSet.stJournalNum)
 		utils.Assert(edit.journalNum < vSet.nextFileNum)
@@ -594,11 +579,6 @@ func (vSet *VersionSet) recover(manifest storage.Fd) (err error) {
 	vSet.nextFileNum = nextFileNum
 	vSet.stSeqNum = seqNum
 	vSet.stJournalNum = logFileNum
-
-	vSet.manifestFd = storage.Fd{
-		FileType: storage.KDescriptorFile,
-		Num:      vSet.allocFileNum(),
-	}
 
 	return
 }

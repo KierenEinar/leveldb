@@ -9,12 +9,12 @@ import (
 )
 
 func TestVersionEdit_Encode_Decode(t *testing.T) {
-	vSet, _ := recoverVersionSet(t)
+	vSet, lastEdit := recoverVersionSet(t)
 
 	edit := newVersionEdit()
-	edit.setLastSeq(1000)
-	edit.setNextFile(100)
-	edit.setLogNum(99)
+	edit.setLastSeq(lastEdit.lastSeq + 1000)
+	edit.setNextFile(lastEdit.nextFileNum + 1000)
+	edit.setLogNum(lastEdit.journalNum + 1000)
 
 	// add table
 	for level, tFiles := range vSet.current.levels {

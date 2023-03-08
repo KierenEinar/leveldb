@@ -336,8 +336,8 @@ func (dbImpl *DBImpl) doCompactionWork(c *compaction1) (err error) {
 
 	if err == nil {
 
-		for _, input := range c.inputs {
-			for which, table := range input {
+		for which, input := range c.inputs {
+			for _, table := range input {
 				c.edit.addDelTable(which+c.sourceLevel, uint64(table.fd))
 			}
 		}

@@ -633,6 +633,11 @@ func (dbImpl *DBImpl) recover(edit *VersionEdit) error {
 		}
 	}
 
+	dbImpl.versionSet.manifestFd = storage.Fd{
+		FileType: storage.KDescriptorFile,
+		Num:      dbImpl.versionSet.allocFileNum(),
+	}
+
 	return nil
 }
 

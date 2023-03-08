@@ -3,10 +3,12 @@ package leveldb
 import (
 	"bytes"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/KierenEinar/leveldb/comparer"
 
@@ -17,6 +19,10 @@ import (
 	"github.com/KierenEinar/leveldb/storage"
 )
 
+var (
+	rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+)
+
 func Test_VersionBuilder(t *testing.T) {
 
 	t.Run("test add and delete table file", func(t *testing.T) {
@@ -24,64 +30,53 @@ func Test_VersionBuilder(t *testing.T) {
 		vSet, _ := recoverVersionSet(t)
 		defer vSet.opt.Storage.RemoveDir()
 
+		current := vSet.getCurrent()
+		current.Ref()
+		defer current.UnRef()
+
 		// del level 1 [1E, 1F], [1G, 1H], [1Q, 1R]
 		// add level 1 [1EA, 1FA], [1GA, 1GH], [1GI, 1GZ], [1QA, 1QZ]
 		edit := newVersionEdit()
 
-		delTables := make([]delTable, 0)
 		addTables := make([]addTable, 0)
-		levelDelFd := [3]uint64{2, 3, 8}
+		levelDelIdx := [3]uint64{2, 3, 4} // must be sorted
 
-		levelAddFn := func(level int) []addTable {
+		levelAddFn := func(version *Version, level int, levelDelIdx []uint64) []addTable {
+
+			firstDelIx := levelDelIdx[0]
+			lastDelIx := levelDelIdx[len(levelDelIdx)-1]
+
+			minIKey := version.levels[level][firstDelIx].iMin
+			maxIKey := version.levels[level][lastDelIx].iMax
+
 			return []addTable{
 				{
 					level:  level,
-					number: uint64(level*1000 + 1),
-					imin:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"EA"), keyTypeValue, 100),
-					imax:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"FA"), keyTypeValue, 100),
-				},
-				{
-					level:  level,
-					number: uint64(level*1000 + 2),
-					imin:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"GA"), keyTypeValue, 100),
-					imax:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"GH"), keyTypeValue, 100),
-				},
-				{
-					level:  level,
-					number: uint64(level*1000 + 3),
-					imin:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"GI"), keyTypeValue, 100),
-					imax:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"GZ"), keyTypeValue, 100),
-				},
-				{
-					level:  level,
-					number: uint64(level*1000 + 4),
-					imin:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"QA"), keyTypeValue, 100),
-					imax:   buildInternalKey(nil, []byte(strconv.Itoa(level)+"QZ"), keyTypeValue, 100),
+					size:   1000,
+					number: vSet.allocFileNum(),
+					imin:   buildInternalKey(nil, append(minIKey.userKey(), []byte("A")...), keyTypeValue, 1000),
+					imax:   buildInternalKey(nil, append(maxIKey.userKey(), []byte("A")...), keyTypeValue, 1000),
 				},
 			}
 		}
-		baseFd := 100
-		for i := 1; i < KLevelNum; i++ {
 
-			for _, fd := range levelDelFd {
-				delTables = append(delTables, delTable{
-					level:  i,
-					number: uint64(baseFd+i*10) + fd,
-				})
+		for level := 0; level < KLevelNum; level++ {
+			tFiles := current.levels[level]
+			for _, ix := range levelDelIdx {
+				edit.addDelTable(level, uint64(tFiles[ix].fd))
 			}
 
-			addTables = append(addTables, levelAddFn(i)...)
-
+			addTables = append(addTables, levelAddFn(current, level, levelDelIdx[:])...)
 		}
 
 		edit.addedTables = addTables
-		edit.delTables = delTables
 
 		v := newVersion(vSet)
-		vb := newBuilder(vSet, vSet.current)
+		vb := newBuilder(vSet, current)
 		vb.apply(*edit)
 		vb.saveTo(v)
-		vSet.current = v
+		vSet.appendVersion(v)
+
 		for level := 0; level < len(vSet.current.levels); level++ {
 			tFiles := vSet.current.levels[level]
 			for i := 0; i < len(tFiles); i++ {
@@ -310,7 +305,7 @@ func Test_vBuilder_maybeAddFile(t *testing.T) {
 
 func initVersionEdit(t *testing.T, opt *options.Options) *VersionEdit {
 
-	baseTableFd := 100
+	baseTableFd := rnd.Intn(10000) + 1000
 
 	edit := newVersionEdit()
 
@@ -357,7 +352,7 @@ func initVersionEdit(t *testing.T, opt *options.Options) *VersionEdit {
 	lastTable := edit.addedTables[len(edit.addedTables)-1]
 
 	edit.setLastSeq(lastTable.imax.seq())
-	edit.setLogNum(99)
+	edit.setLogNum(uint64(baseTableFd - 1))
 	edit.setNextFile(lastTable.number + 1)
 	edit.setCompareName(opt.InternalComparer.Name())
 
@@ -381,7 +376,7 @@ func initManifest(t *testing.T, opt *options.Options) (storage.Fd, *VersionEdit)
 
 	fd := storage.Fd{
 		FileType: storage.KDescriptorFile,
-		Num:      98,
+		Num:      rnd.Uint64(),
 	}
 
 	w, err := opt.Storage.NewAppendableFile(fd)
@@ -408,4 +403,8 @@ func recoverVersionSet(t *testing.T) (*VersionSet, *VersionEdit) {
 		t.Fatal(err)
 	}
 	return vSet, edit
+}
+
+func TestVersion_get(t *testing.T) {
+
 }
