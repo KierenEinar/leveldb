@@ -57,6 +57,34 @@ magic: ["W���$uG�"]
 statics: ["datablock key_count=52", "indexblock key_count=1"]
 
 */
+
+type DumpDecoder interface {
+	DecodeKey(key []byte) []byte
+	DecodeValue(value []byte) []byte
+}
+
+type BytesDecoder struct{}
+
+func (d *BytesDecoder) DecodeKey(key []byte) []byte {
+	return key
+}
+
+func (d *BytesDecoder) DecodeValue(val []byte) []byte {
+	return val
+}
+
+type BlockHandleDecoder struct{}
+
+func (d *BlockHandleDecoder) DecodeKey(key []byte) []byte {
+	return key
+}
+
+func (d *BlockHandleDecoder) DecodeValue(val []byte) []byte {
+	_, bh := readBH(val)
+	s := fmt.Sprintf("{\"offset\":%d, \"length\":%d}", bh.offset, bh.length)
+	return []byte(s)
+}
+
 type Dump struct {
 	data        []byte
 	dumpSSTable *dumpSSTable
@@ -65,8 +93,17 @@ type Dump struct {
 	w           io.Writer
 }
 
-type formatter interface {
-	print(w io.Writer)
+func NewDump(r io.Reader, w io.Writer, iFilter filter.IFilter,
+	dataBlockD DumpDecoder, indexBlockD DumpDecoder) *Dump {
+	return &Dump{
+		r:       r,
+		w:       w,
+		iFilter: iFilter,
+		dumpSSTable: &dumpSSTable{
+			dataBlockDecoder:  dataBlockD,
+			indexBlockDecoder: indexBlockD,
+		},
+	}
 }
 
 const maxColumn = 100
@@ -77,7 +114,7 @@ type dumpFooter struct {
 	magic      string
 }
 
-func (f *dumpFooter) print(w io.Writer) {
+func (f *dumpFooter) parseTo(w io.Writer) {
 	/**
 	footer:
 	index_block: ["offset":0, "length":100]
@@ -105,10 +142,9 @@ type dumpDataBlock struct {
 	kvPairs          []kv
 	restartPointKeys [][]byte
 	restartNum       int
-	printValue       func(value []byte) []byte
 }
 
-func (d *dumpDataBlock) print(w io.Writer) {
+func (d *dumpDataBlock) parseTo(w io.Writer, decoder DumpDecoder) {
 
 	// title
 	buf := bytes.NewBuffer(nil)
@@ -128,9 +164,9 @@ func (d *dumpDataBlock) print(w io.Writer) {
 	_, _ = buf.WriteTo(w)
 
 	for idx, kv := range d.kvPairs {
-		buf.WriteString(fmt.Sprintf("\"%s\"", kv.k))
+		buf.WriteString(fmt.Sprintf("\"%s\"", decoder.DecodeKey(kv.k)))
 		buf.WriteString(":")
-		buf.WriteString(fmt.Sprintf("\"%s\"", d.printValue(kv.v)))
+		buf.WriteString(fmt.Sprintf("\"%s\"", decoder.DecodeValue(kv.v)))
 		if idx < len(d.kvPairs)-1 {
 			buf.WriteString(", ")
 		}
@@ -145,7 +181,7 @@ func (d *dumpDataBlock) print(w io.Writer) {
 	// restart_point
 	buf.WriteString("restart_point:[")
 	for idx, key := range d.restartPointKeys {
-		buf.WriteString(fmt.Sprintf("\"%s\"", key))
+		buf.WriteString(fmt.Sprintf("\"%s\"", decoder.DecodeKey(key)))
 		if idx < len(d.restartPointKeys)-1 {
 			buf.WriteString(", ")
 		}
@@ -176,7 +212,7 @@ type dumpFilter struct {
 	baseLg     uint8
 }
 
-func (f *dumpFilter) print(w io.Writer) {
+func (f *dumpFilter) parseTo(w io.Writer) {
 
 	/**
 	filter_data_0: [0100001100010110101010001010101010101]
@@ -236,7 +272,7 @@ type dumpMetaBlock struct {
 	blockHandle
 }
 
-func (d *dumpMetaBlock) print(w io.Writer) {
+func (d *dumpMetaBlock) parseTo(w io.Writer) {
 	/**
 	meta block: ["filter.name", offset: xx, len: xxx]
 	*/
@@ -260,11 +296,13 @@ type kv struct {
 }
 
 type dumpSSTable struct {
-	dataBlocks  []*dumpDataBlock
-	filterBlock *dumpFilter
-	metaBlock   *dumpMetaBlock
-	indexBlock  *dumpDataBlock
-	footer      *dumpFooter
+	dataBlocks        []*dumpDataBlock
+	filterBlock       *dumpFilter
+	metaBlock         *dumpMetaBlock
+	indexBlock        *dumpDataBlock
+	footer            *dumpFooter
+	dataBlockDecoder  DumpDecoder
+	indexBlockDecoder DumpDecoder
 	statics
 }
 
@@ -276,19 +314,20 @@ type statics struct {
 	dataBlockKeyInFilterCount int
 }
 
-func (f *dumpSSTable) print(w io.Writer) {
+func (f *dumpSSTable) parseTo(w io.Writer) {
 
 	_, _ = w.Write([]byte("data_block\n"))
 	for _, d := range f.dataBlocks {
-		d.print(w)
+		d.parseTo(w, f.dataBlockDecoder)
 		f.statics.dataBlockKeyCount += len(d.kvPairs)
 	}
 
-	f.filterBlock.print(w)
-	f.metaBlock.print(w)
+	f.filterBlock.parseTo(w)
+	f.metaBlock.parseTo(w)
 	_, _ = w.Write([]byte("index_block\n"))
-	f.indexBlock.print(w)
-	f.footer.print(w)
+	f.indexBlock.parseTo(w, f.indexBlockDecoder)
+
+	f.footer.parseTo(w)
 
 	f.statics.indexBlockKeyCount += len(f.indexBlock.kvPairs)
 
@@ -334,9 +373,6 @@ func (dump *Dump) readDataBlock(bh blockHandle) *dumpDataBlock {
 		restartNum:       restartPointNums,
 		kvPairs:          make([]kv, 0),
 		restartPointKeys: make([][]byte, 0),
-		printValue: func(value []byte) []byte {
-			return value
-		},
 	}
 
 	for readIdx < restartPointOffset {
@@ -373,32 +409,19 @@ func (dump *Dump) readDataBlock(bh blockHandle) *dumpDataBlock {
 	return block
 }
 
-func NewDump(r io.Reader, w io.Writer, iFilter filter.IFilter) *Dump {
-	return &Dump{
-		r:       r,
-		w:       w,
-		iFilter: iFilter,
-	}
-}
-
 func (dump *Dump) Format() error {
 	if err := dump.readAll(); err != nil {
 		return err
 	}
 
 	// data block
-	dump.dumpSSTable.print(dump.w)
+	dump.dumpSSTable.parseTo(dump.w)
 	return nil
 }
 
 func (dump *Dump) readAll() error {
 
-	// ready readAll
-	if dump.dumpSSTable != nil {
-		return nil
-	}
-
-	ssTable := &dumpSSTable{}
+	ssTable := dump.dumpSSTable
 
 	ssTable.dataBlocks = make([]*dumpDataBlock, 0)
 
@@ -418,11 +441,7 @@ func (dump *Dump) readAll() error {
 
 	// read index block
 	indexBlock := dump.readDataBlock(footer.indexBlock)
-	indexBlock.printValue = func(value []byte) []byte {
-		_, bh := readBH(value)
-		s := fmt.Sprintf("{\"offset\":%d, \"length\":%d}", bh.offset, bh.length)
-		return []byte(s)
-	}
+
 	ssTable.indexBlock = indexBlock
 
 	// read all data block

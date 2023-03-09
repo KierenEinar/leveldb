@@ -381,7 +381,7 @@ func TestDump_Format(t *testing.T) {
 
 	defer r.Close()
 
-	dump := NewDump(r, os.Stdout, filter.DefaultFilter)
+	dump := NewDump(r, os.Stdout, filter.DefaultFilter, &BytesDecoder{}, &BlockHandleDecoder{})
 	err = dump.Format()
 	if err != nil {
 		t.Fatal(err)
@@ -528,7 +528,7 @@ func TestReader_Get_Dump(t *testing.T) {
 	seqReader, _ := fs.NewSequentialReader(fd)
 	defer seqReader.Close()
 
-	dump := NewDump(seqReader, os.Stdout, filter.DefaultFilter)
+	dump := NewDump(seqReader, os.Stdout, filter.DefaultFilter, &BytesDecoder{}, &BlockHandleDecoder{})
 
 	dump.Format()
 
