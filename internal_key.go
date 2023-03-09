@@ -55,6 +55,7 @@ func parseInternalKey(ikey internalKey) (ukey []byte, kt keyType, seq uint64, er
 		return
 	}
 
+	ukey = ikey[:len(ikey)-8]
 	num := binary.LittleEndian.Uint64(ikey[len(ikey)-8:])
 	seq, kty := num>>8, num&0xff
 	kt = keyType(kty)

@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/KierenEinar/leveldb/collections"
-	"github.com/KierenEinar/leveldb/table"
 	"github.com/KierenEinar/leveldb/utils"
 
 	"github.com/KierenEinar/leveldb/comparer"
+	"github.com/KierenEinar/leveldb/table"
 
 	"github.com/KierenEinar/leveldb/wal"
 
@@ -213,17 +213,18 @@ func TestVersion_get(t *testing.T) {
 	defer vSet.opt.Storage.RemoveDir()
 	initDataSetForVersion(t, vSet)
 
-	//version := vSet.current
-	//version.Ref()
-	//defer version.UnRef()
-	//
-	//expectediKey := buildInternalKey(nil, []byte("5QAA"), keyTypeValue, kMaxNum)
-	//var value []byte
-	//_, err := version.get(expectediKey, &value)
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
+	version := vSet.current
+	version.Ref()
+	defer version.UnRef()
 
+	expectedIKey := buildInternalKey(nil, []byte("5QAAA"), keyTypeValue, kMaxNum)
+	var value []byte
+	gstat, err := version.get(expectedIKey, &value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("get stat = %#v", gstat)
+	t.Logf("value=%s", value)
 }
 
 func Test_upperBound(t *testing.T) {
@@ -465,75 +466,73 @@ func initDataSetForVersion(t *testing.T, vSet *VersionSet) {
 	current.Ref()
 	defer current.UnRef()
 
-	tFile := current.levels[0][5]
-	tableOperation := newTableOperation(vSet.opt, vSet.tableCache)
-	tWriter, err := tableOperation.create(*tFile)
-	if err != nil {
-		t.Fatal(err)
+	for _, tFiles := range current.levels {
+		for ix := range tFiles {
+			tFile := tFiles[ix]
+			tableOperation := newTableOperation(vSet.opt, vSet.tableCache)
+			tWriter, err := tableOperation.create(*tFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			iMinKey := tFile.iMin
+			iMaxKey := tFile.iMax
+			minSeq := iMinKey.seq()
+			maxSeq := iMaxKey.seq()
+			seq := minSeq
+			minUKey := iMinKey.userKey()
+			maxUKey := iMaxKey.userKey()
+			loopTimes := 10
+			skipList := collections.NewSkipList(time.Now().UnixNano(), 0, vSet.opt.InternalComparer)
+			idx := 0
+			utils.ForeachLetter(loopTimes, func(i int, c rune) {
+				seq++
+				key := append(minUKey, bytes.Repeat([]byte{byte(c)}, idx)...)
+				ikey := buildInternalKey(nil, key, keyTypeValue, seq)
+				value := append([]byte("value-"), key...)
+				err = skipList.Put(ikey, value)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if seq > maxSeq {
+					t.Fatal("seq should not gt maxeq")
+				}
+
+				if vSet.opt.InternalComparer.Compare(ikey, iMaxKey) > 0 {
+					t.Fatalf("userkey=%s should not gt maxuserkey=%s", ikey.userKey(), maxUKey)
+				}
+
+				if i == len(utils.LetterBytes())-1 {
+					idx++
+				}
+			})
+
+			iter := skipList.NewIterator()
+			for iter.Next() {
+				err = tWriter.append(iter.Key(), iter.Value())
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = tWriter.finish()
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			iter.UnRef()
+			skipList.UnRef()
+
+			reader, _ := vSet.opt.Storage.NewSequentialReader(storage.Fd{
+				FileType: storage.KTableFile,
+				Num:      uint64(tFile.fd),
+			})
+
+			//dump := table.NewDump(reader, os.Stdout, vSet.opt.FilterPolicy,
+			//	&dataSetDataBlockDecoder{}, &dataSetIndexBlockDecoder{})
+
+			//dump.Format()
+			reader.Close()
+		}
 	}
-	iMinKey := tFile.iMin
-	iMaxKey := tFile.iMax
-	minSeq := iMinKey.seq()
-	maxSeq := iMaxKey.seq()
-	seq := minSeq
-	minUKey := iMinKey.userKey()
-	maxUKey := iMaxKey.userKey()
-	loopTimes := 10
-	skipList := collections.NewSkipList(time.Now().UnixNano(), 0, vSet.opt.InternalComparer)
-	idx := 0
-	utils.ForeachLetter(loopTimes, func(i int, c rune) {
-		seq++
-		key := append(minUKey, bytes.Repeat([]byte{byte(c)}, idx)...)
-		ikey := buildInternalKey(nil, key, keyTypeValue, seq)
-		value := append([]byte("value-"), key...)
-		err = skipList.Put(ikey, value)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if seq > maxSeq {
-			t.Fatal("seq should not gt maxeq")
-		}
-
-		if vSet.opt.InternalComparer.Compare(ikey, iMaxKey) > 0 {
-			t.Fatalf("userkey=%s should not gt maxuserkey=%s", ikey.userKey(), maxUKey)
-		}
-
-		if i == len(utils.LetterBytes())-1 {
-			idx++
-		}
-	})
-
-	iter := skipList.NewIterator()
-	for iter.Next() {
-		err = tWriter.append(iter.Key(), iter.Value())
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	err = tWriter.finish()
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	iter.UnRef()
-	skipList.UnRef()
-
-	reader, _ := vSet.opt.Storage.NewSequentialReader(storage.Fd{
-		FileType: storage.KTableFile,
-		Num:      uint64(tFile.fd),
-	})
-
-	dump := table.NewDump(reader, os.Stdout, vSet.opt.FilterPolicy,
-		&dataSetDataBlockDecoder{}, &dataSetIndexBlockDecoder{})
-
-	dump.Format()
-	reader.Close()
-
-	//for _, tFiles := range current.levels {
-	//	for ix := range tFiles {
-	//
-	//	}
-	//}
 
 }

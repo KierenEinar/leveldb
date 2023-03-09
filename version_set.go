@@ -144,7 +144,6 @@ func (builder *vBuilder) saveTo(v *Version) {
 			builder.maybeAddFile(v, tFile, level)
 			beginPos = pos
 		}
-
 		for i := beginPos; i < len(baseFile); i++ {
 			builder.maybeAddFile(v, baseFile[i], level)
 		}
@@ -161,7 +160,7 @@ func upperBound(s tFiles, level int, tFile *tFile, cmp comparer.BasicComparer) i
 		return idx
 	}
 	idx := sort.Search(len(s), func(i int) bool {
-		return cmp.Compare(s[i].iMax, tFile.iMax) > 0
+		return cmp.Compare(tFile.iMax, s[i].iMax) < 0
 	})
 	return idx
 }
@@ -176,8 +175,12 @@ func (builder *vBuilder) maybeAddFile(v *Version, file *tFile, level int) {
 	cmp := builder.vSet.opt.InternalComparer
 	if level > 0 && len(files) > 0 {
 		if cmp.Compare(files[len(files)-1].iMax, file.iMin) >= 0 {
-			fmt.Printf("%s-%s, %s\n", files[len(files)-1].iMax.userKey(),
-				files[len(files)-1].iMin.userKey(), file.iMin.userKey())
+			for _, tFile := range files {
+				fmt.Printf("level=%d, fd=%d, min=%s, max=%s\n", level, tFile.fd,
+					tFile.iMin.userKey(), tFile.iMax.userKey())
+				fmt.Printf("last file add, level=%d, fd=%d, min=%s, max=%s\n",
+					level, file.fd, file.iMin.userKey(), file.iMax.userKey())
+			}
 		}
 		utils.Assert(cmp.Compare(files[len(files)-1].iMax, file.iMin) < 0,
 			fmt.Sprintf("last file imax=%s, newfile min=%s", files[len(files)-1].iMax, file.iMin))
@@ -711,6 +714,7 @@ func (v *Version) get(ikey internalKey, value *[]byte) (gStat *GetStat, err erro
 		case kStatCorruption:
 			return false
 		case kStatNotFound:
+			gStat.MissHint++
 			return true
 		case kStatDelete:
 			return false
