@@ -822,10 +822,6 @@ func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, e
 		opt.FilterPolicy = IFilter
 	}
 
-	if o == nil || o.FilterBaseLg == 0 {
-		opt.FilterBaseLg = 8
-	}
-
 	if o == nil || o.Hash32 == nil {
 		opt.Hash32 = fnv.New32()
 	}
@@ -838,8 +834,8 @@ func sanitizeOptions(dbpath string, o *options.Options) (opt *options.Options, e
 		opt.BlockRestartInterval = 16
 	}
 
-	if o == nil || o.BlockSize == 0 {
-		opt.BlockSize = 4 << 10 // 4k
+	if o == nil || o.BlockSizeLg == 0 {
+		opt.BlockSizeLg = 14 // 4k
 	}
 
 	if o == nil || o.MaxEstimateFileSize == 0 {

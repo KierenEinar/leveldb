@@ -311,7 +311,7 @@ func NewWriter(writer storage.SequentialWriter, opt *options.Options) *Writer {
 		dataBlockWriter:  newBlockWriter(int(opt.BlockRestartInterval), opt.InternalComparer),
 		indexBlockWriter: newBlockWriter(1, opt.InternalComparer),
 		metaBlockWriter:  newBlockWriter(1, opt.InternalComparer),
-		filterWriter:     newFilterWriter(opt.FilterPolicy, opt.FilterBaseLg),
+		filterWriter:     newFilterWriter(opt.FilterPolicy, opt.BlockSizeLg),
 		comparer:         opt.InternalComparer,
 		opt:              opt,
 	}
@@ -332,7 +332,7 @@ func (tableWriter *Writer) Append(key, value []byte) (err error) {
 	dataBlockWriter.append(key, value)
 	filterWriter.addKey(key)
 
-	if dataBlockWriter.bytesLen() >= int(tableWriter.opt.BlockSize) {
+	if dataBlockWriter.bytesLen() >= 1<<tableWriter.opt.BlockSizeLg {
 		err = tableWriter.finishDataBlock()
 		if err != nil {
 			return

@@ -21,9 +21,6 @@ type Options struct {
 	// filter keys policy, set default InternalKey Filter
 	FilterPolicy filter.IFilter
 
-	// filter base lg, set default 8 (1<<8=1024)
-	FilterBaseLg uint8
-
 	// set the storage to support data persist, set default fileStorage
 	Storage storage.Storage
 
@@ -48,8 +45,8 @@ type Options struct {
 	// on ldb format, every RestartNums of entry build a restart group, set default 16
 	BlockRestartInterval uint8
 
-	// ldb block size, set default 4k
-	BlockSize uint32
+	// ldb block size, set default 4k (14)
+	BlockSizeLg uint8
 
 	// ldb max estimate file size, table size always effect when persist block, set default 2m
 	MaxEstimateFileSize uint32
