@@ -1,6 +1,7 @@
 package leveldb
 
 import (
+	"github.com/KierenEinar/leveldb/logger"
 	"github.com/KierenEinar/leveldb/options"
 	"github.com/KierenEinar/leveldb/storage"
 	"github.com/KierenEinar/leveldb/wal"
@@ -78,5 +79,15 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 	dbImpl.maybeScheduleCompaction()
 	go dbImpl.mPoolDrain()
 	db = dbImpl
+
+	// init log
+	logger.Setup(logger.Settings{
+		Dir:        dbpath,
+		Name:       "LEVELDB",
+		Ext:        "LOG",
+		ThreshHold: 1 << 30, // 1g
+		Closed:     dbImpl.closed,
+	})
+
 	return
 }
