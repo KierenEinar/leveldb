@@ -74,7 +74,7 @@ func Infof(format string, v ...interface{}) {
 	print(Info, format, v)
 }
 
-func Warmf(format string, v ...interface{}) {
+func Warnf(format string, v ...interface{}) {
 	print(Warn, format, v)
 }
 
