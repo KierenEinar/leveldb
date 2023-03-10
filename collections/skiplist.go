@@ -193,6 +193,11 @@ func (skl *SkipList) Get(key []byte) ([]byte, error) {
 	return nil, errors.ErrNotFound
 }
 
+func (skl *SkipList) Has(key []byte) (found bool, err error) {
+	_, found, err = skl.FindGreaterOrEqual(key)
+	return
+}
+
 func (skl *SkipList) FindGreaterOrEqual(key []byte) (*skipListNode, bool, error) {
 	if skl.Released() {
 		return nil, false, errors.ErrReleased

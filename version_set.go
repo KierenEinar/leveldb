@@ -8,6 +8,7 @@ import (
 	"io"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/KierenEinar/leveldb/cache"
 
@@ -144,6 +145,7 @@ func (builder *vBuilder) saveTo(v *Version) {
 			builder.maybeAddFile(v, tFile, level)
 			beginPos = pos
 		}
+		iter.UnRef()
 		for i := beginPos; i < len(baseFile); i++ {
 			builder.maybeAddFile(v, baseFile[i], level)
 		}
@@ -167,7 +169,7 @@ func upperBound(s tFiles, level int, tFile *tFile, cmp comparer.BasicComparer) i
 
 func (builder *vBuilder) maybeAddFile(v *Version, file *tFile, level int) {
 
-	if builder.deleted[level].contains(uint64(file.fd)) {
+	if contains, err := builder.deleted[level].contains(uint64(file.fd)); err != nil || contains {
 		return
 	}
 
@@ -204,7 +206,7 @@ type uintSortedSet struct {
 func newUintSortedSet() *uintSortedSet {
 	uSet := &uintSortedSet{
 		anySortedSet: &anySortedSet{
-			BTree:                 collections.InitBTree(3, &uint64Comparer{}),
+			SkipList:              collections.NewSkipList(time.Now().UnixNano(), 0, &uint64Comparer{}),
 			anySortedSetEncodeKey: encodeUint64ToBinary,
 		},
 	}
@@ -275,7 +277,7 @@ type tFileSortedSet struct {
 func newTFileSortedSet(cmp comparer.Comparer) *tFileSortedSet {
 	tSet := &tFileSortedSet{
 		anySortedSet: &anySortedSet{
-			BTree: collections.InitBTree(3, &tFileComparer{
+			SkipList: collections.NewSkipList(time.Now().UnixNano(), 0, &tFileComparer{
 				iComparer: cmp,
 			}),
 			anySortedSetEncodeKey: encodeTFileToBinary,
@@ -321,44 +323,47 @@ func decodeBinaryToTFile(b []byte) *tFile {
 }
 
 type anySortedSet struct {
-	*collections.BTree
+	*collections.SkipList
 	anySortedSetEncodeKey
-	addValue bool
-	size     int
+	size int
 }
 
 type anySortedSetEncodeKey func(item interface{}) (bool, []byte)
 
-func (set *anySortedSet) add(item interface{}) bool {
+func (set *anySortedSet) add(item interface{}) (bool, error) {
 	ok, key := set.anySortedSetEncodeKey(item)
 	if !ok {
 		panic("anySortedSet add item encode failed, please check...")
 	}
-	if !set.Has(key) {
-		if set.addValue {
-			set.Insert(key, item)
-		} else {
-			set.Insert(key, nil)
+
+	found, err := set.Has(key)
+	if err != nil {
+		return false, err
+	}
+
+	if !found {
+		if err := set.Put(key, nil); err != nil {
+			return false, err
 		}
 		set.size++
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
-func (set *anySortedSet) remove(item interface{}) bool {
+func (set *anySortedSet) remove(item interface{}) (bool, error) {
 	ok, key := set.anySortedSetEncodeKey(item)
 	if !ok {
 		panic("anySortedSet remove item encode failed, please check...")
 	}
-	ok = set.Remove(key)
+	ok, err := set.Del(key)
 	if ok {
 		set.size--
 	}
-	return ok
+	return ok, err
 }
 
-func (set *anySortedSet) contains(item interface{}) bool {
+func (set *anySortedSet) contains(item interface{}) (bool, error) {
 	ok, key := set.anySortedSetEncodeKey(item)
 	if !ok {
 		panic("anySortedSet contains item encode failed, please check...")
