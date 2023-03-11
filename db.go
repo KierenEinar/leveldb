@@ -83,10 +83,8 @@ func Open(dbpath string, option *options.Options) (db DB, err error) {
 	// init log
 	logger.Setup(logger.Settings{
 		Dir:        dbpath,
-		Name:       "LEVELDB",
+		PrefixName: "LEVELDB",
 		Ext:        "LOG",
-		ThreshHold: 1 << 30, // 1g
-		Closed:     dbImpl.closed,
 	})
 
 	return

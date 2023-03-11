@@ -13,10 +13,13 @@ import (
 
 type Settings struct {
 	Dir        string
-	Name       string
+	PrefixName string
 	Ext        string
-	ThreshHold int // log file max threshhold bytes
-	Closed     <-chan struct{}
+}
+
+type loggerSettings struct {
+	s          Settings
+	fileLogger *log.Logger
 }
 
 const (
@@ -26,87 +29,168 @@ const (
 	Error
 )
 
-const bufLen = 32 * 1024
-
 var (
-	logger  *log.Logger
-	buf     = make([]byte, 0, bufLen)
-	buffer  *bytes.Buffer
-	mu      sync.Mutex
-	writesN uint64
-	levels  = []string{"Debug", "Info", "Warn", "Error"}
-	crlf    = "\r\n"
+	logger       *log.Logger
+	levelsPrefix = []string{"[level-Debug] ", "[level-Info] ", "[level-Warn] ", "[level-Error] "}
+	logChan      = make(chan *bytes.Buffer, 0)
+	closedChan   = make(chan struct{}, 0)
+	resetLogChan = make(chan *loggerSettings, 0)
+	bytesPool    sync.Pool
+	fileLog      *os.File
+	crlf         = "\r\n"
+	settings     *Settings
+	once         sync.Once
 )
 
+func init() {
+	logger = log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile)
+	bytesPool = sync.Pool{
+		New: func() interface{} {
+			return bytes.NewBuffer(nil)
+		},
+	}
+	go asyncFlush()
+}
+
+func Close() {
+	closedChan <- struct{}{}
+}
+
 func Setup(settings Settings) {
-	name := fmt.Sprintf("%s.%s", settings.Name, settings.Ext)
-	filePath := filepath.Join(settings.Dir, name)
-	w := mustOpen(filePath)
-	mw := io.MultiWriter(os.Stdout, w)
-	buffer = bytes.NewBuffer(buf)
-	logger = log.New(mw, "", log.LstdFlags|log.Lshortfile)
-	go flush(settings.Closed)
+	once.Do(func() {
+		name := formatLogFileName(settings.PrefixName, time.Now().Format("2006-01-02"), settings.Ext)
+		_ = os.MkdirAll(settings.Dir, 0644)
+		filePath := filepath.Join(settings.Dir, name)
+		fileLog = mustOpen(filePath)
+		mw := io.MultiWriter(fileLog, os.Stdout)
+		ls := &loggerSettings{
+			s:          settings,
+			fileLogger: log.New(mw, "", log.LstdFlags|log.Lshortfile),
+		}
+		resetLogChan <- ls
+	})
 }
 
 func SetPrefix(prefix string) {
-	mu.Lock()
-	defer mu.Unlock()
 	logger.SetPrefix(prefix)
 }
 
-func print(level int, format string, v ...interface{}) {
-	mu.Lock()
-	defer mu.Unlock()
-	n1, _ := buffer.WriteString("[level-")
-	n2, _ := buffer.WriteString(levels[level])
-	n3, _ := buffer.WriteString("] ")
-	n4, _ := buffer.WriteString(fmt.Sprintf(format, v))
-	n5, _ := buffer.WriteString(crlf)
-	writesN += uint64(n1 + n2 + n3 + n4 + n5)
-
+func printf(level int, format string, v ...interface{}) {
+	buf := bytesPool.Get().(*bytes.Buffer)
+	buf.WriteString(levelsPrefix[level])
+	buf.WriteString(fmt.Sprintf(format, v...))
+	buf.WriteString(crlf)
+	logChan <- buf
 }
 
 func Debugf(format string, v ...interface{}) {
-	print(Debug, format, v)
+	printf(Debug, format, v...)
 }
 
 func Infof(format string, v ...interface{}) {
-	print(Info, format, v)
+	printf(Info, format, v...)
 }
 
 func Warnf(format string, v ...interface{}) {
-	print(Warn, format, v)
+	printf(Warn, format, v...)
 }
 
 func Errorf(format string, v ...interface{}) {
-	print(Error, format, v)
+	printf(Error, format, v...)
 }
 
-func flush(closedC <-chan struct{}) {
-	ticker := time.NewTicker(time.Second * 1)
+func asyncFlush() {
+	nextRotateTime := time.Now().AddDate(0, 0, 1)
+	nextRotateTimeZero := time.Date(nextRotateTime.Year(),
+		nextRotateTime.Month(),
+		nextRotateTime.Day(), 0, 0, 0, 0, time.Local)
+	ticker := time.NewTicker(1)
+	defer ticker.Stop()
+	<-ticker.C
+	d := -time.Since(nextRotateTimeZero)
+	ticker.Reset(d)
+
 	for {
+
 		select {
-		case <-ticker.C:
-			mu.Lock()
-			if buffer.Len() > 0 {
-				logger.Print(buffer.String())
+
+		case ls := <-resetLogChan:
+			logger = ls.fileLogger
+			settings = &ls.s
+
+		case buf := <-logChan:
+			ok, err := rotateLogFileIfNeeded(nextRotateTimeZero)
+			if err != nil {
+				logger.Println(err)
 			}
-			mu.Unlock()
-		case <-closedC:
+			if ok {
+				newNextRotateTimeZero := nextRotateTimeZero.Add(time.Hour * 24)
+				ticker.Reset(newNextRotateTimeZero.Sub(nextRotateTimeZero))
+				nextRotateTimeZero = newNextRotateTimeZero
+			}
+
+			logger.Print(buf.String())
+			buf.Reset()
+			bytesPool.Put(buf)
+
+		case <-ticker.C:
+			ok, err := rotateLogFileIfNeeded(nextRotateTimeZero)
+			if err != nil {
+				logger.Println(err)
+			}
+			if ok {
+				newNextRotateTimeZero := nextRotateTimeZero.Add(time.Hour * 24)
+				ticker.Reset(newNextRotateTimeZero.Sub(nextRotateTimeZero))
+				nextRotateTimeZero = newNextRotateTimeZero
+			}
+
+		case <-closedChan:
 			return
 		}
 	}
+
 }
 
-func rotate() {
+func rotateLogFileIfNeeded(nextRotateTimeZero time.Time) (bool, error) {
 
+	if settings == nil {
+		return false, nil
+	}
+
+	if time.Since(nextRotateTimeZero) < 0 {
+		return false, nil
+	}
+
+	dir := settings.Dir
+	prefix := settings.PrefixName
+	ext := settings.Ext
+
+	rName := filepath.Join(dir, formatLogFileName(prefix, nextRotateTimeZero.Format("2006-01-02"), ext))
+
+	newFileLog, err := os.OpenFile(rName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return false, err
+	}
+
+	mw := io.MultiWriter(os.Stdout, newFileLog)
+	logger = log.New(mw, "", log.LstdFlags|log.Lshortfile)
+
+	_ = fileLog.Close()
+
+	return true, nil
 }
 
 func mustOpen(filePath string) *os.File {
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE, 0644)
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		_, _ = os.Stdout.WriteString(err.Error())
 		panic(err)
 	}
 	return file
+}
+
+func formatLogFileName(prefix string, timeFormatted string, ext string) string {
+	return fmt.Sprintf("%s-%s.%s", prefix,
+		timeFormatted,
+		ext)
 }
