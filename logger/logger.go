@@ -7,14 +7,16 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
 
 type Settings struct {
-	Dir        string
-	PrefixName string
-	Ext        string
+	Dir          string
+	PrefixName   string
+	Ext          string
+	BackupCounts int
 }
 
 type loggerSettings struct {
@@ -30,16 +32,18 @@ const (
 )
 
 var (
-	logger       *log.Logger
-	levelsPrefix = []string{"[level-Debug] ", "[level-Info] ", "[level-Warn] ", "[level-Error] "}
-	logChan      = make(chan *bytes.Buffer, 0)
-	closedChan   = make(chan struct{}, 0)
-	resetLogChan = make(chan *loggerSettings, 0)
-	bytesPool    sync.Pool
-	fileLog      *os.File
-	crlf         = "\r\n"
-	settings     *Settings
-	once         sync.Once
+	logger              *log.Logger
+	levelsPrefix        = []string{"[level-Debug] ", "[level-Info] ", "[level-Warn] ", "[level-Error] "}
+	logChan             = make(chan *bytes.Buffer, 0)
+	closedChan          = make(chan struct{}, 0)
+	resetLogChan        = make(chan *loggerSettings, 0)
+	removeObsoleteChan  = make(chan chan int, 0)
+	bytesPool           sync.Pool
+	fileLog             *os.File
+	crlf                = "\r\n"
+	settings            *Settings
+	once                sync.Once
+	defaultBackupCounts = 15
 )
 
 func init() {
@@ -50,14 +54,20 @@ func init() {
 		},
 	}
 	go asyncFlush()
+	go removeObsolete()
 }
 
 func Close() {
-	closedChan <- struct{}{}
+	close(closedChan)
 }
 
 func Setup(settings Settings) {
 	once.Do(func() {
+
+		if settings.BackupCounts == 0 {
+			settings.BackupCounts = defaultBackupCounts
+		}
+
 		name := formatLogFileName(settings.PrefixName, time.Now().Format("2006-01-02"), settings.Ext)
 		_ = os.MkdirAll(settings.Dir, 0644)
 		filePath := filepath.Join(settings.Dir, name)
@@ -151,6 +161,85 @@ func asyncFlush() {
 
 }
 
+func removeObsolete() {
+
+	for {
+		select {
+		case ch := <-removeObsoleteChan:
+
+			if settings == nil {
+				ch <- 0
+				return
+			}
+
+			fmt.Println("remove obsolete working...")
+
+			entries, err := os.ReadDir(settings.Dir)
+			if err != nil {
+				ch <- 0
+				return
+			}
+
+			logFileCreateTimes := make([]time.Time, 0)
+			logFileMap := make(map[string]string)
+			for _, entry := range entries {
+				var (
+					prefix        string
+					timeFormatted string
+					ext           string
+				)
+
+				if entry.IsDir() {
+					continue
+				}
+
+				name := entry.Name()
+				n, err := fmt.Sscanf(name, "%s-%s.%s", &prefix, &timeFormatted, &ext)
+				if err != nil {
+					//Errorf("background removeObsolete Sscanf, entry_name=%s, failed, err=%v",
+					//	name, err)
+					continue
+				}
+				if n != 3 {
+					continue
+				}
+
+				t, err := time.Parse("2006-01-02", timeFormatted)
+				if err != nil {
+					continue
+				}
+
+				logFileCreateTimes = append(logFileCreateTimes, t)
+				logFileMap[timeFormatted] = name
+			}
+
+			sort.Slice(logFileCreateTimes, func(i, j int) bool {
+				return logFileCreateTimes[i].After(logFileCreateTimes[j])
+			})
+			n := 0
+			for idx, logCtime := range logFileCreateTimes {
+				if idx < settings.BackupCounts {
+					continue
+				}
+				entry, ok := logFileMap[logCtime.Format("2006-01-02")]
+				if !ok {
+					continue
+				}
+				err = os.Remove(filepath.Join(settings.Dir, entry))
+				if err == nil {
+					n++
+				}
+			}
+
+			ch <- n
+
+		case <-closedChan:
+			return
+		}
+	}
+
+}
+
 func rotateLogFileIfNeeded(nextRotateTimeZero time.Time) (bool, error) {
 
 	if settings == nil {
@@ -176,6 +265,9 @@ func rotateLogFileIfNeeded(nextRotateTimeZero time.Time) (bool, error) {
 	logger = log.New(mw, "", log.LstdFlags|log.Lshortfile)
 
 	_ = fileLog.Close()
+
+	ch := make(chan int, 1)
+	removeObsoleteChan <- ch
 
 	return true, nil
 }

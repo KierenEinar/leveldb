@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KierenEinar/leveldb/logger"
+
 	"github.com/KierenEinar/leveldb/cache"
 
 	"github.com/KierenEinar/leveldb/collections"
@@ -178,9 +180,9 @@ func (builder *vBuilder) maybeAddFile(v *Version, file *tFile, level int) {
 	if level > 0 && len(files) > 0 {
 		if cmp.Compare(files[len(files)-1].iMax, file.iMin) >= 0 {
 			for _, tFile := range files {
-				fmt.Printf("level=%d, fd=%d, min=%s, max=%s\n", level, tFile.fd,
+				logger.Infof("level=%d, fd=%d, min=%s, max=%s\n", level, tFile.fd,
 					tFile.iMin.userKey(), tFile.iMax.userKey())
-				fmt.Printf("last file add, level=%d, fd=%d, min=%s, max=%s\n",
+				logger.Infof("last file add, level=%d, fd=%d, min=%s, max=%s\n",
 					level, file.fd, file.iMin.userKey(), file.iMax.userKey())
 			}
 		}
