@@ -3,12 +3,12 @@ package logger
 import (
 	"os"
 	"testing"
-	"time"
 )
 
 func TestLog(t *testing.T) {
 	t.Run("test info", func(t *testing.T) {
 		Infof("test info, args=%s", "hello")
+		Infof("test info, args=%s", "world")
 	})
 
 	t.Run("test set up", func(t *testing.T) {
@@ -18,8 +18,8 @@ func TestLog(t *testing.T) {
 			Ext:        "LOG",
 		})
 
-		Infof("test info, args=%s", "world")
-		time.Sleep(time.Second)
+		Infof("test info, args=%s", "world1")
+		Infof("test info, args=%s", "world2")
 	})
 
 }
