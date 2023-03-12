@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KierenEinar/leveldb/errors"
+
 	"github.com/KierenEinar/leveldb/collections"
 	"github.com/KierenEinar/leveldb/utils"
 
@@ -217,7 +219,7 @@ func TestVersion_get(t *testing.T) {
 	version.Ref()
 	defer version.UnRef()
 
-	expectedIKey := buildInternalKey(nil, []byte("5QAAA"), keyTypeValue, kMaxNum)
+	expectedIKey := buildInternalKey(nil, []byte("leveldb-test-A5QQQ"), keyTypeValue, kMaxNum)
 	var value []byte
 	gstat, err := version.get(expectedIKey, &value)
 	if err != nil {
@@ -225,6 +227,14 @@ func TestVersion_get(t *testing.T) {
 	}
 	t.Logf("get stat = %#v", gstat)
 	t.Logf("value=%s", value)
+
+	unExpectedIKey := buildInternalKey(nil, []byte("5Qpoys"), keyTypeValue, kMaxNum)
+	var unExpectedValue []byte
+	gstat, err = version.get(unExpectedIKey, &unExpectedValue)
+	if err != errors.ErrNotFound {
+		t.Fatal("expected not found")
+	}
+
 }
 
 func Test_upperBound(t *testing.T) {
@@ -359,6 +369,8 @@ func initVersionEdit(t *testing.T, opt *options.Options) *VersionEdit {
 
 	edit := newVersionEdit()
 
+	prefix := "leveldb-test-"
+
 	for i := 0; i < KLevelNum; i++ {
 		c := rune(65)
 		step := 1
@@ -369,8 +381,8 @@ func initVersionEdit(t *testing.T, opt *options.Options) *VersionEdit {
 			}
 			si := c
 			ei := c + rune(step)
-			s := strconv.Itoa(i) + string(si)
-			e := strconv.Itoa(i) + string(ei)
+			s := prefix + string(si) + strconv.Itoa(i)
+			e := prefix + string(ei) + strconv.Itoa(i)
 			imin := buildInternalKey(nil, []byte(s), keyTypeValue, sequence((100*i+j)*1000)+2)
 			imax := buildInternalKey(nil, []byte(e), keyTypeValue, sequence(100*i+j+1)*1000+1)
 

@@ -169,7 +169,7 @@ func removeObsolete() {
 
 			if settings == nil {
 				ch <- 0
-				return
+				break
 			}
 
 			fmt.Println("remove obsolete working...")
@@ -177,7 +177,7 @@ func removeObsolete() {
 			entries, err := os.ReadDir(settings.Dir)
 			if err != nil {
 				ch <- 0
-				return
+				break
 			}
 
 			logFileCreateTimes := make([]time.Time, 0)

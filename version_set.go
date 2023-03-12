@@ -641,12 +641,12 @@ func (v *Version) UnRef() int32 {
 }
 
 func (v *Version) updateStat(gStat *GetStat) bool {
-	seekFile := gStat.SeekFile
+	seekFile := gStat.FirstMissSeekFile
 	if seekFile != nil {
 		seekFile.allowSeeks--
 		if seekFile.allowSeeks == 0 && v.fileToCompact == nil {
 			v.fileToCompact = seekFile
-			v.fileToCompactLevel = gStat.SeekFileLevel
+			v.fileToCompactLevel = gStat.FirstMissSeekFileLevel
 			return true
 		}
 	}
@@ -680,9 +680,9 @@ func (v *Version) get(ikey internalKey, value *[]byte) (gStat *GetStat, err erro
 	match := func(level int, tFile *tFile) (continueLoop bool) {
 		v.vSet.tableCache.Get(ikey, tFile, func(rkey internalKey, rValue []byte, rErr error) {
 
-			if lastFileRead != nil {
-				gStat.SeekFile = lastFileRead
-				gStat.SeekFileLevel = lastFileReadLevel
+			if lastFileRead != nil && gStat.FirstMissSeekFile == nil {
+				gStat.FirstMissSeekFile = lastFileRead
+				gStat.FirstMissSeekFileLevel = lastFileReadLevel
 			}
 
 			lastFileRead = tFile
