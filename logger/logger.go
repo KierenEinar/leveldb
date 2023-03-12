@@ -34,7 +34,7 @@ const (
 var (
 	logger              *log.Logger
 	levelsPrefix        = []string{"[level-Debug] ", "[level-Info] ", "[level-Warn] ", "[level-Error] "}
-	logChan             = make(chan *bytes.Buffer, 0)
+	logChan             = make(chan *bytes.Buffer, 4096)
 	closedChan          = make(chan struct{}, 0)
 	resetLogChan        = make(chan *loggerSettings, 0)
 	removeObsoleteChan  = make(chan chan int, 0)
