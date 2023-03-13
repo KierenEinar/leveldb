@@ -72,3 +72,7 @@ func buildInternalKey(dst, uKey []byte, kt keyType, sequence sequence) internalK
 	binary.LittleEndian.PutUint64(dst[n:], (uint64(sequence)<<8)|uint64(kt))
 	return dst
 }
+
+func debugInternalKey(ikey internalKey) string {
+	return fmt.Sprintf("user_key=%s, seq=%d, key_type=%d", ikey.userKey(), ikey.seq(), ikey.keyType())
+}

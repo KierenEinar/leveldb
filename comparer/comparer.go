@@ -3,6 +3,7 @@ package comparer
 import "bytes"
 
 type BasicComparer interface {
+	// Compare The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
 	Compare(a, b []byte) int
 	Name() []byte
 }

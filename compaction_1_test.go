@@ -215,18 +215,18 @@ func Test_tFiles_getRange1(t *testing.T) {
 			args: args{
 				cmp: IComparer,
 			},
-			wantImin: buildInternalKey(nil, []byte("aa"), keyTypeValue, 1000),
-			wantImax: buildInternalKey(nil, []byte("zz"), keyTypeValue, 6500),
+			wantImin: buildInternalKey(nil, []byte("aa"), keyTypeValue, 4000),
+			wantImax: buildInternalKey(nil, []byte("zz"), keyTypeValue, 950),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotImin, gotImax := tt.tFiles.getRange1(tt.args.cmp)
 			if !reflect.DeepEqual(gotImin, tt.wantImin) {
-				t.Errorf("getRange1() gotImin = %s, want %s", string(gotImin), string(tt.wantImin))
+				t.Errorf("getRange1() gotImin = %s, want %s", debugInternalKey(gotImin), debugInternalKey(tt.wantImin))
 			}
 			if !reflect.DeepEqual(gotImax, tt.wantImax) {
-				t.Errorf("getRange1() gotImax = %s, want %s", string(gotImax), string(tt.wantImax))
+				t.Errorf("getRange1() gotImax = %s, want %s", debugInternalKey(gotImax), debugInternalKey(tt.wantImax))
 			}
 		})
 	}
